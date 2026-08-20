@@ -1,0 +1,16 @@
+# —— 前端 ——
+web/node_modules/
+web/dist/
+
+# —— 数据（CI 每次重新生成，绝不进 git 历史）——
+web/public/data/
+
+# —— Python ——
+__pycache__/
+*.pyc
+.pytest_cache/
+pipeline/*.egg-info/
+
+# —— 环境 ——
+.env
+.vscode/

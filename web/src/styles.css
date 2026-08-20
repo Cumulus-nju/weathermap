@@ -1,0 +1,122 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: #070b14;
+  font-family: 'PingFang SC', 'Microsoft YaHei', -apple-system, system-ui, sans-serif;
+  color: #dbe4f0;
+  overflow: hidden;
+}
+
+.app {
+  position: relative;
+  height: 100%;
+}
+
+.map-container {
+  position: absolute;
+  inset: 0;
+}
+
+/* ---- FPS 徽章 ---- */
+.fps-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: #9fe08c;
+  background: rgba(8, 14, 24, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  backdrop-filter: blur(6px);
+  user-select: none;
+  z-index: 10;
+}
+
+/* ---- 控制面板 ---- */
+.panel {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 220px;
+  padding: 14px 16px;
+  background: rgba(8, 14, 24, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  backdrop-filter: blur(8px);
+  user-select: none;
+  z-index: 10;
+}
+
+.panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  margin-bottom: 10px;
+  color: #9fd2ff;
+}
+
+.ctrl-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.ctrl-label {
+  width: 40px;
+  flex-shrink: 0;
+  color: #8aa0bd;
+}
+
+.ctrl-range {
+  flex: 1;
+  accent-color: #4a9eff;
+  min-width: 0;
+}
+
+.ctrl-value {
+  width: 42px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #dbe4f0;
+}
+
+.toggle {
+  justify-content: space-between;
+}
+
+.toggle-btn {
+  padding: 2px 14px;
+  font-size: 12px;
+  color: #8aa0bd;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.toggle-btn.on {
+  color: #0a1420;
+  background: #4a9eff;
+  border-color: #4a9eff;
+}
+
+/* ---- 水印 ---- */
+.watermark {
+  position: absolute;
+  bottom: 10px;
+  left: 12px;
+  font-size: 11px;
+  color: rgba(160, 180, 205, 0.45);
+  user-select: none;
+  z-index: 10;
+}
