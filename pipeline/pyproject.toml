@@ -16,3 +16,6 @@ dependencies = [
 
 [project.scripts]
 wm-pipeline = "pipeline.run_pipeline:main"
+
+[tool.setuptools.packages.find]
+include = ["pipeline*"]
