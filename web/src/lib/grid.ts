@@ -27,6 +27,8 @@ export interface WindGrid {
   apcp?: Float32Array;
   /** 全场最大风速 m/s（配色自适应归一化用，加载时算好） */
   maxSpeed?: number;
+  /** 全场最大降水 mm（仅地面，降水色带自适应量程用） */
+  maxApcp?: number;
 }
 
 export interface GridDomain {
@@ -73,6 +75,11 @@ export function buildGrid(
     if (s > m) m = s;
   }
   g.maxSpeed = m;
+  if (g.apcp) {
+    let pm = 0;
+    for (let i = 0; i < g.apcp.length; i++) if (g.apcp[i] > pm) pm = g.apcp[i];
+    g.maxApcp = pm;
+  }
   return g;
 }
 

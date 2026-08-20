@@ -215,6 +215,55 @@ body,
   text-align: right;
 }
 
+/* ---- M4 图例 ---- */
+.legend {
+  position: absolute;
+  left: 14px;
+  bottom: 118px;
+  padding: 8px 10px;
+  background: rgba(8, 14, 24, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  backdrop-filter: blur(8px);
+  user-select: none;
+  font-size: 11px;
+  z-index: 10;
+}
+
+.legend-title {
+  color: #9fd2ff;
+  font-weight: 600;
+  margin-bottom: 6px;
+  text-align: center;
+}
+
+.legend-unit {
+  color: #8aa0bd;
+  font-weight: 400;
+}
+
+.legend-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.legend-bar {
+  width: 10px;
+  height: 120px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.legend-scale {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  font-variant-numeric: tabular-nums;
+  color: #b9cde6;
+  line-height: 1;
+}
+
 /* ---- 水印 ---- */
 .watermark {
   position: absolute;

@@ -25,3 +25,20 @@ export const useWindSettings = create<WindSettings>((set) => ({
   setFade: (fade) => set({ fade }),
   setStreak: (streak) => set({ streak }),
 }));
+
+// M4 叠加图层：色斑叠加（温度/湿度/降水）+ 不透明度
+export type OverlayField = 'off' | 'temp' | 'rh' | 'apcp';
+
+interface OverlayState {
+  field: OverlayField;
+  opacity: number;
+  setField: (f: OverlayField) => void;
+  setOpacity: (o: number) => void;
+}
+
+export const useOverlay = create<OverlayState>((set) => ({
+  field: 'off',
+  opacity: 0.65,
+  setField: (field) => set({ field }),
+  setOpacity: (opacity) => set({ opacity }),
+}));

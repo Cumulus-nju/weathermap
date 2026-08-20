@@ -13,17 +13,11 @@ void main() {
 }
 `;
 
-// 共享：坐标变换 + 双线性采样（拼进各 pass）
-// 注意：u_m0/u_scale/u_p0/u_cssSize 只在 draw pass 用到，但必须声明在 COMMON，
-// 因为 UPDATE_FRAG 也包含 COMMON——GLSL 中 uniform 声明必须在函数引用之前。
-// u_wind0/u_wind1 + u_mix 实现时间轴交叉淡化：相邻两个时次的风场按 frac 混合。
-const COMMON = `
-uniform vec2 u_windSize;   // 风场纹理尺寸 (cols, rows)
+// 共享：网格 UV -> clip 的坐标变换（风层 + 色斑叠加层共用）
+// 依赖轴对齐 mercator 仿射投影（地图禁旋转/俯仰）
+const GRID_MATH = `
 uniform vec2 u_domain;     // lon0, lat0
 uniform vec2 u_domainSpan; // (lon1-lon0, lat1-lat0)
-uniform sampler2D u_wind0; // 当前时次风场
-uniform sampler2D u_wind1; // 下一时次风场
-uniform float u_mix;       // 0..1 时次插值系数
 uniform vec2 u_m0;         // 参考点 mercator 坐标
 uniform vec2 u_scale;      // mercator->CSS px 缩放
 uniform vec2 u_p0;         // 参考点 CSS px
@@ -49,6 +43,17 @@ vec2 gridToClip(vec2 g) {
   vec2 s = gridToScreen(g);
   return vec2(s.x / u_cssSize.x * 2.0 - 1.0, -(s.y / u_cssSize.y * 2.0 - 1.0));
 }
+`;
+
+// 风层共享：坐标变换 + 双线性采样（拼进各 pass）
+// 注意：uniform 声明必须在函数引用之前（UPDATE_FRAG 也包含 COMMON）。
+// u_wind0/u_wind1 + u_mix 实现时间轴交叉淡化：相邻两个时次的风场按 frac 混合。
+const COMMON = `
+${GRID_MATH}
+uniform vec2 u_windSize;   // 风场纹理尺寸 (cols, rows)
+uniform sampler2D u_wind0; // 当前时次风场
+uniform sampler2D u_wind1; // 下一时次风场
+uniform float u_mix;       // 0..1 时次插值系数
 
 // 单纹理双线性采样（NEAREST 纹理 + 手动插值）
 vec2 sampleTex(sampler2D tex, vec2 gridUV) {
@@ -181,5 +186,56 @@ out vec4 fragColor;
 uniform sampler2D u_trail;
 void main() {
   fragColor = vec4(texture(u_trail, v_uv).rgb, 1.0);
+}
+`;
+
+// ---- M4 色斑叠加层：域内全屏四边形，色带映射 + 时次交叉淡化 ----
+// 顶点按网格 UV 走 gridToClip（与风层同投影）；片元采样 1D 色带纹理。
+export const OVERLAY_VERT = `#version 300 es
+precision highp float;
+in vec2 a_uv; // 网格 UV [0,1]²，v=0 南（纹理行序）
+${GRID_MATH}
+out vec2 v_uv;
+void main() {
+  gl_Position = vec4(gridToClip(a_uv), 0.0, 1.0);
+  v_uv = a_uv;
+}
+`;
+
+export const OVERLAY_FRAG = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+out vec4 fragColor;
+uniform sampler2D u_field0; // 当前时次字段
+uniform sampler2D u_field1; // 下一时次字段
+uniform vec2 u_fieldSize;   // 字段纹理尺寸 (cols, rows)
+uniform float u_mix;        // 0..1 时次插值
+uniform sampler2D u_cmap;   // 色带 1D 纹理（RGBA8, 64px）
+uniform vec2 u_valRange;    // (min, max)
+uniform float u_opacity;
+
+// 手动双线性采样（NEAREST 纹理；32F 纹理在部分软渲染器上不支持 LINEAR 过滤）
+float sampleField(sampler2D tex, vec2 uv) {
+  vec2 tc = uv * u_fieldSize - 0.5;
+  vec2 base = floor(tc);
+  vec2 fr = fract(tc);
+  vec2 inv = 1.0 / u_fieldSize;
+  vec2 c00 = (base + vec2(0.5)) * inv;
+  vec2 c10 = (base + vec2(1.0, 0.0) + 0.5) * inv;
+  vec2 c01 = (base + vec2(0.0, 1.0) + 0.5) * inv;
+  vec2 c11 = (base + vec2(1.0, 1.0) + 0.5) * inv;
+  float v00 = texture(tex, c00).r;
+  float v10 = texture(tex, c10).r;
+  float v01 = texture(tex, c01).r;
+  float v11 = texture(tex, c11).r;
+  return mix(mix(v00, v10, fr.x), mix(v01, v11, fr.x), fr.y);
+}
+
+void main() {
+  float v = mix(sampleField(u_field0, v_uv), sampleField(u_field1, v_uv), u_mix);
+  float t = clamp((v - u_valRange.x) / (u_valRange.y - u_valRange.x), 0.0, 1.0);
+  vec4 c = texture(u_cmap, vec2(t, 0.5));
+  // 预乘 alpha 输出（MapLibre 帧缓冲用 ONE, ONE_MINUS_SRC_ALPHA 合成）
+  fragColor = vec4(c.rgb * c.a * u_opacity, c.a * u_opacity);
 }
 `;

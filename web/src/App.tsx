@@ -5,6 +5,7 @@ import { ControlPanel } from './components/ControlPanel';
 import { FpsMeter } from './components/FpsMeter';
 import { TimeScrubber } from './components/TimeScrubber';
 import { ValueCard } from './components/ValueCard';
+import { Legend } from './components/Legend';
 import { fetchManifest } from './lib/wmb';
 import { useTime, levelLabel } from './lib/timeStore';
 import { usePointer } from './lib/pointerStore';
@@ -53,6 +54,7 @@ export default function App() {
       <ControlPanel />
       <Watermark />
       <ValueCard />
+      <Legend />
     </div>
   );
 }

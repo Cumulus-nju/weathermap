@@ -1,4 +1,4 @@
-import { useWindSettings } from '../store';
+import { useWindSettings, useOverlay, type OverlayField } from '../store';
 import { LEVELS } from '../lib/dataLoader';
 import { useTime, levelLabel } from '../lib/timeStore';
 
@@ -27,6 +27,50 @@ function LevelChips() {
         </button>
       ))}
     </div>
+  );
+}
+
+// M4 叠加图层选择（温度/湿度/降水）+ 不透明度
+const OVERLAY_OPTS: { id: OverlayField; label: string }[] = [
+  { id: 'off', label: '关' },
+  { id: 'temp', label: '温度' },
+  { id: 'rh', label: '湿度' },
+  { id: 'apcp', label: '降水' },
+];
+
+function OverlayChips() {
+  const field = useOverlay((s) => s.field);
+  const setField = useOverlay((s) => s.setField);
+  return (
+    <div className="level-row" title="叠加图层（色斑）">
+      {OVERLAY_OPTS.map((o) => (
+        <button
+          key={o.id}
+          className={`level-chip${field === o.id ? ' on' : ''}`}
+          onClick={() => setField(o.id)}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function OverlayOpacity() {
+  const field = useOverlay((s) => s.field);
+  const opacity = useOverlay((s) => s.opacity);
+  const setOpacity = useOverlay((s) => s.setOpacity);
+  if (field === 'off') return null;
+  return (
+    <Slider
+      label="透明度"
+      value={opacity}
+      min={0.15}
+      max={1}
+      step={0.05}
+      format={(v) => `${(v * 100).toFixed(0)}%`}
+      onChange={setOpacity}
+    />
   );
 }
 function Slider({
@@ -67,6 +111,9 @@ export function ControlPanel() {
     <div className="panel">
       <div className="panel-title">气压层</div>
       <LevelChips />
+      <div className="panel-title panel-title2">叠加图层</div>
+      <OverlayChips />
+      <OverlayOpacity />
       <div className="panel-title panel-title2">风场粒子</div>
       <label className="ctrl-row toggle">
         <span>动画</span>
