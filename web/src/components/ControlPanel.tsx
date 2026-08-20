@@ -1,4 +1,5 @@
-import { useWindSettings, useOverlay, type OverlayField } from '../store';
+import { useWindSettings, useOverlay, useUnits, type OverlayField } from '../store';
+import { WIND_UNITS, TEMP_UNITS } from '../lib/units';
 import { LEVELS } from '../lib/dataLoader';
 import { useTime, levelLabel } from '../lib/timeStore';
 
@@ -73,8 +74,70 @@ function OverlayOpacity() {
     />
   );
 }
+
+// M4-2 单位切换：风（m/s↔km/h↔节）+ 温度（℃↔℉）
+function UnitRow() {
+  const wind = useUnits((s) => s.wind);
+  const setWind = useUnits((s) => s.setWind);
+  const temp = useUnits((s) => s.temp);
+  const setTemp = useUnits((s) => s.setTemp);
+  return (
+    <>
+      <div className="panel-title panel-title2">单位</div>
+      <div className="level-row" title="风速单位">
+        {WIND_UNITS.map((u) => (
+          <button
+            key={u.id}
+            className={`level-chip${wind === u.id ? ' on' : ''}`}
+            onClick={() => setWind(u.id)}
+          >
+            {u.label}
+          </button>
+        ))}
+      </div>
+      <div className="level-row level-row2" title="温度单位">
+        {TEMP_UNITS.map((u) => (
+          <button
+            key={u.id}
+            className={`level-chip${temp === u.id ? ' on' : ''}`}
+            onClick={() => setTemp(u.id)}
+          >
+            {u.label}
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
+// M4-2 风粒子配色预设（与 shaders DRAW_FRAG 的 pal* 一一对应）
+const PALETTES = [
+  { id: 0, label: '标准' },
+  { id: 1, label: '极光' },
+  { id: 2, label: '白' },
+  { id: 3, label: '珊瑚' },
+];
+
+function PaletteChips() {
+  const palette = useWindSettings((s) => s.palette);
+  const setPalette = useWindSettings((s) => s.setPalette);
+  return (
+    <div className="level-row" title="风粒子配色">
+      {PALETTES.map((p) => (
+        <button
+          key={p.id}
+          className={`level-chip${palette === p.id ? ' on' : ''}`}
+          onClick={() => setPalette(p.id)}
+        >
+          {p.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function Slider({
-  label, value, min, max, step, format, onChange,
+  label, value, min, max, step, format, onChange, disabled,
 }: {
   label: string;
   value: number;
@@ -83,9 +146,10 @@ function Slider({
   step: number;
   format?: (v: number) => string;
   onChange: (v: number) => void;
+  disabled?: boolean;
 }) {
   return (
-    <label className="ctrl-row">
+    <label className={`ctrl-row${disabled ? ' ctrl-disabled' : ''}`}>
       <span className="ctrl-label">{label}</span>
       <input
         className="ctrl-range"
@@ -94,6 +158,7 @@ function Slider({
         max={max}
         step={step}
         value={value}
+        disabled={disabled}
         onChange={(e) => onChange(parseFloat(e.target.value))}
       />
       <span className="ctrl-value">{format ? format(value) : value}</span>
@@ -103,8 +168,8 @@ function Slider({
 
 export function ControlPanel() {
   const {
-    enabled, particleCount, speed, fade, streak,
-    setEnabled, setParticleCount, setSpeed, setFade, setStreak,
+    enabled, particleCount, autoParticles, speed, fade, streak,
+    setEnabled, setParticleCount, setAutoParticles, setSpeed, setFade, setStreak,
   } = useWindSettings();
 
   return (
@@ -114,6 +179,7 @@ export function ControlPanel() {
       <div className="panel-title panel-title2">叠加图层</div>
       <OverlayChips />
       <OverlayOpacity />
+      <UnitRow />
       <div className="panel-title panel-title2">风场粒子</div>
       <label className="ctrl-row toggle">
         <span>动画</span>
@@ -124,6 +190,15 @@ export function ControlPanel() {
           {enabled ? '开' : '关'}
         </button>
       </label>
+      <label className="ctrl-row toggle">
+        <span>粒子数自动</span>
+        <button
+          className={autoParticles ? 'toggle-btn on' : 'toggle-btn'}
+          onClick={() => setAutoParticles(!autoParticles)}
+        >
+          {autoParticles ? '开' : '关'}
+        </button>
+      </label>
       <Slider
         label="粒子数"
         value={particleCount}
@@ -132,7 +207,9 @@ export function ControlPanel() {
         step={5_000}
         format={(v) => `${(v / 1000).toFixed(0)}k`}
         onChange={setParticleCount}
+        disabled={autoParticles}
       />
+      <PaletteChips />
       <Slider
         label="流速"
         value={speed}

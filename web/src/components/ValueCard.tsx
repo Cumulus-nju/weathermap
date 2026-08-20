@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { usePointer } from '../lib/pointerStore';
 import { useTime, levelLabel } from '../lib/timeStore';
+import { useUnits } from '../store';
 import { getGrid } from '../lib/dataLoader';
 import { sampleField } from '../lib/grid';
+import { windSpeed, windUnitLabel, tempFromC, tempUnitLabel } from '../lib/units';
 
 // M3 读数卡：指针移动时双线性采样 (层, 当前时次/下一时次) 的网格，按播放头 frac 插值。
 // 用 rAF ~20Hz 节流读 zustand，不触发地图渲染循环；卡上数值随拖动实时更新。
@@ -55,6 +57,7 @@ function fmtTime(iso: string): string {
 
 export function ValueCard() {
   const [ro, setRo] = useState<Readout | null>(null);
+  const { wind: windUnit, temp: tempUnit } = useUnits();
 
   useEffect(() => {
     let raf = 0;
@@ -139,13 +142,15 @@ export function ValueCard() {
       <div className="vc-row vc-wind">
         <span className="vc-key">风</span>
         <span className="vc-val">
-          {ro.speed === null ? '—' : `${ro.speed.toFixed(1)} m/s`}
+          {ro.speed === null ? '—' : `${windSpeed(ro.speed, windUnit).toFixed(1)} ${windUnitLabel(windUnit)}`}
           {ro.dir !== null && ` · ${ro.dirText}(${ro.dir.toFixed(0)}°)`}
         </span>
       </div>
       <div className="vc-row">
         <span className="vc-key">温度</span>
-        <span className="vc-val">{ro.temp === null ? '—' : `${ro.temp.toFixed(1)} ℃`}</span>
+        <span className="vc-val">
+          {ro.temp === null ? '—' : `${tempFromC(ro.temp, tempUnit).toFixed(1)} ${tempUnitLabel(tempUnit)}`}
+        </span>
       </div>
       <div className="vc-row">
         <span className="vc-key">湿度</span>

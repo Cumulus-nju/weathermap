@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
-import { useOverlay } from '../store';
+import { useOverlay, useUnits } from '../store';
 import { useTime } from '../lib/timeStore';
 import { getGrid } from '../lib/dataLoader';
 import { CMAPS, cmapToCss, fieldValueRange, type Colormap } from '../lib/colormaps';
+import { tempFromK, tempUnitLabel } from '../lib/units';
 
 // M4 图例：当前叠加层的色带 + 量程。与 ColorLayer 同源（CMAPS），所见即所渲。
 // 温度/湿度量程固定（数据未加载也可显示）；降水自适应当前网格最大值（未就绪时显示占位量程）。
+// M4-2：温度量程/单位标签随 useUnits 切换 ℃↔℉。
 
 interface LegendState {
   cmap: Colormap;
@@ -14,12 +16,13 @@ interface LegendState {
 }
 
 function fmtVal(field: Colormap['id'], v: number): string {
-  if (field === 'temp') return `${(v - 273.15).toFixed(0)}°`;
+  if (field === 'temp') return `${Math.round(tempFromK(v, useUnits.getState().temp))}°`;
   return `${Math.round(v)}`;
 }
 
 export function Legend() {
   const [state, setState] = useState<LegendState | null>(null);
+  const tempUnit = useUnits((s) => s.temp); // 温度单位切换时重渲染（标题 + 量程数字）
 
   useEffect(() => {
     let raf = 0;
@@ -66,7 +69,10 @@ export function Legend() {
   return (
     <div className="legend">
       <div className="legend-title">
-        {state.cmap.name} <span className="legend-unit">({state.cmap.unit})</span>
+        {state.cmap.name}{' '}
+        <span className="legend-unit">
+          ({state.cmap.id === 'temp' ? tempUnitLabel(tempUnit) : state.cmap.unit})
+        </span>
       </div>
       <div className="legend-row">
         <div

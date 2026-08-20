@@ -121,6 +121,19 @@ body,
   gap: 5px;
 }
 
+.level-row2 {
+  margin-top: 5px;
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.ctrl-disabled {
+  opacity: 0.5;
+}
+
+.ctrl-disabled .ctrl-range {
+  cursor: not-allowed;
+}
+
 .level-chip {
   padding: 4px 0;
   font-size: 12px;

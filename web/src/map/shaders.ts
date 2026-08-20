@@ -144,26 +144,50 @@ export const DRAW_FRAG = `#version 300 es
 precision highp float;
 in float v_speed01;
 out vec4 fragColor;
+uniform int u_palette;      // 配色预设：0=标准 1=极光 2=白 3=珊瑚
 uniform float u_lineAlpha;
 
-vec3 windColor(float t) {
-  vec3 c0 = vec3(0.05, 0.25, 0.60);
-  vec3 c1 = vec3(0.05, 0.55, 0.75);
-  vec3 c2 = vec3(0.10, 0.75, 0.50);
-  vec3 c3 = vec3(0.85, 0.85, 0.25);
-  vec3 c4 = vec3(0.95, 0.45, 0.20);
-  vec3 c5 = vec3(0.90, 0.20, 0.30);
-  float s = clamp(t, 0.0, 1.0);
+// 5 段色阶插值（s 0..1 由速度/最大风速归一化）
+vec3 ramp(float s, vec3 c0, vec3 c1, vec3 c2, vec3 c3, vec3 c4) {
+  s = clamp(s, 0.0, 1.0);
   if (s < 0.2) return mix(c0, c1, s / 0.2);
   else if (s < 0.4) return mix(c1, c2, (s - 0.2) / 0.2);
   else if (s < 0.6) return mix(c2, c3, (s - 0.4) / 0.2);
   else if (s < 0.8) return mix(c3, c4, (s - 0.6) / 0.2);
-  else return mix(c4, c5, (s - 0.8) / 0.2);
+  else return c4;
+}
+
+// 标准：蓝→青→绿→黄→红（默认，暖区醒目）
+vec3 palStandard(float s) {
+  return ramp(s,
+    vec3(0.05, 0.25, 0.60), vec3(0.05, 0.55, 0.75), vec3(0.10, 0.75, 0.50),
+    vec3(0.85, 0.85, 0.25), vec3(0.90, 0.20, 0.30));
+}
+// 极光：深蓝→青→翠绿→紫（冷调，弱风区细节好）
+vec3 palAurora(float s) {
+  return ramp(s,
+    vec3(0.03, 0.16, 0.42), vec3(0.05, 0.50, 0.65), vec3(0.25, 0.80, 0.40),
+    vec3(0.80, 0.85, 0.20), vec3(0.75, 0.35, 0.85));
+}
+// 白：黑→灰→白（底图感，纯矢量感）
+vec3 palWhite(float s) {
+  return ramp(s,
+    vec3(0.10, 0.12, 0.16), vec3(0.30, 0.34, 0.40), vec3(0.55, 0.60, 0.66),
+    vec3(0.80, 0.84, 0.88), vec3(1.00, 1.00, 1.00));
+}
+// 珊瑚：紫→粉→橙→米黄（暖调，风速梯度分明）
+vec3 palCoral(float s) {
+  return ramp(s,
+    vec3(0.25, 0.08, 0.35), vec3(0.60, 0.18, 0.50), vec3(0.90, 0.38, 0.42),
+    vec3(1.00, 0.62, 0.30), vec3(1.00, 0.92, 0.55));
 }
 
 void main() {
-  vec3 col = windColor(v_speed01) * u_lineAlpha;
-  fragColor = vec4(col, 1.0);
+  vec3 col = u_palette == 1 ? palAurora(v_speed01)
+    : u_palette == 2 ? palWhite(v_speed01)
+    : u_palette == 3 ? palCoral(v_speed01)
+    : palStandard(v_speed01);
+  fragColor = vec4(col * u_lineAlpha, 1.0);
 }
 `;
 

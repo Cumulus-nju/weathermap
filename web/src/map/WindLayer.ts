@@ -62,6 +62,10 @@ export class WindLayer implements CustomLayerInterface {
   private lastFrame = 0;
   private lastDpr = 1;
 
+  // M4-2 动态粒子数：EMA 估 FPS，自动模式定期升降粒子数以维持 ~35fps（弱机/软渲染自适应）
+  private fpsEma = 0;
+  private governTimer = 0;
+
   // ---- 生命周期 ----
   onAdd(map: MapLibreMap, gl: WebGLRenderingContext) {
     this.map = map;
@@ -71,6 +75,12 @@ export class WindLayer implements CustomLayerInterface {
     }
     this.buildPrograms();
     this.buildQuadVao();
+    // 软渲染（SwiftShader/llvmpipe，无硬件 GPU）没有 60fps 预算：自动模式默认压低粒子数
+    const renderer = String(this.gl.getParameter(this.gl.RENDERER));
+    if (/swiftshader|llvmpipe|software|swrast|angle.*(software|llvmpipe)/i.test(renderer)) {
+      const ws = useWindSettings.getState();
+      if (ws.autoParticles) ws.setParticleCount(30_000);
+    }
     this.ensureParticles();
     this.lastFrame = performance.now();
   }
@@ -118,6 +128,19 @@ export class WindLayer implements CustomLayerInterface {
       // 关层时若仍在播放，保持时间轴走（触发 repaint 让 scrubber 更新）
       if (t0.playing) this.map.triggerRepaint();
       return;
+    }
+
+    // M4-2 动态粒子数：EMA 估 FPS，自动模式每 ~3s 升降一次（×0.6 / ×1.4）维持 ~35fps
+    const fpsNow = dt > 0 ? 1 / dt : 60;
+    this.fpsEma = this.fpsEma ? this.fpsEma * 0.95 + fpsNow * 0.05 : fpsNow;
+    this.governTimer += dt;
+    if (s.autoParticles && this.governTimer > 3) {
+      this.governTimer = 0;
+      const cur = s.particleCount;
+      let next = cur;
+      if (this.fpsEma < 28) next = Math.max(10_000, Math.round(cur * 0.6));
+      else if (this.fpsEma > 50 && cur < 200_000) next = Math.min(200_000, Math.round(cur * 1.4));
+      if (next !== cur) s.setParticleCount(next);
     }
 
     const t = useTime.getState();
@@ -239,6 +262,7 @@ export class WindLayer implements CustomLayerInterface {
     this.colorMax = this.colorMax * 0.93 + target * 0.07;
     gl.uniform1f(this.u(this.progDraw, 'u_maxSpeed'), Math.max(6, this.colorMax));
     gl.uniform1f(this.u(this.progDraw, 'u_lineAlpha'), s.streak);
+    gl.uniform1i(this.u(this.progDraw, 'u_palette'), s.palette);
     gl.uniform1f(this.u(this.progDraw, 'u_mix'), mix);
     gl.uniform2f(this.u(this.progDraw, 'u_m0'), m0x, m0y);
     gl.uniform2f(this.u(this.progDraw, 'u_scale'), scaleX, scaleY);
