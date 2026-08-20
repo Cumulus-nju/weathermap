@@ -1,7 +1,34 @@
 import { useWindSettings } from '../store';
+import { LEVELS } from '../lib/dataLoader';
+import { useTime, levelLabel } from '../lib/timeStore';
 
 // M0 控制面板：粒子数 / 速度 / 尾迹 / 亮度，全部走 zustand（不触发 React 重渲染的风层）
 // 渲染循环在 WindLayer.render 里直接读 store.getState()，这里只管滑块 UI
+// M3：顶部加气压层切换（等压面 + 地面）
+
+// 芯片短标签：地面显示"地面"，等压面只显示数字（" hPa" 由面板标题隐含）
+function chipLabel(level: (typeof LEVELS)[number]): string {
+  return level === 'sfc' ? '地面' : `${level}`;
+}
+
+function LevelChips() {
+  const level = useTime((s) => s.level);
+  const setLevel = useTime((s) => s.setLevel);
+  return (
+    <div className="level-row" title="气压层">
+      {LEVELS.map((l) => (
+        <button
+          key={String(l)}
+          className={`level-chip${l === level ? ' on' : ''}`}
+          onClick={() => setLevel(l)}
+          title={levelLabel(l)}
+        >
+          {chipLabel(l)}
+        </button>
+      ))}
+    </div>
+  );
+}
 function Slider({
   label, value, min, max, step, format, onChange,
 }: {
@@ -38,7 +65,9 @@ export function ControlPanel() {
 
   return (
     <div className="panel">
-      <div className="panel-title">风场粒子</div>
+      <div className="panel-title">气压层</div>
+      <LevelChips />
+      <div className="panel-title panel-title2">风场粒子</div>
       <label className="ctrl-row toggle">
         <span>动画</span>
         <button
