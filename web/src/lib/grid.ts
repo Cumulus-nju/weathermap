@@ -14,6 +14,20 @@ export interface WindGrid {
   validTime: string;
 }
 
+export interface GridDomain {
+  lon0: number;
+  lat0: number;
+  lon1: number;
+  lat1: number;
+  cols: number;
+  rows: number;
+}
+
+/** 由解码出的 u/v 字段 + 域构造 WindGrid（M2 时间轴按时次构建） */
+export function buildGrid(d: GridDomain, u: Float32Array, v: Float32Array, validTime: string): WindGrid {
+  return { cols: d.cols, rows: d.rows, lon0: d.lon0, lat0: d.lat0, lon1: d.lon1, lat1: d.lat1, u, v, validTime };
+}
+
 /** Web Mercator：经度 -> [0,1] */
 export function mercX(lon: number): number {
   return (lon + 180) / 360;

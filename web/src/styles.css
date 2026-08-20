@@ -113,10 +113,100 @@ body,
 /* ---- 水印 ---- */
 .watermark {
   position: absolute;
-  bottom: 10px;
+  bottom: 58px; /* 让出时间轴 */
   left: 12px;
   font-size: 11px;
   color: rgba(160, 180, 205, 0.45);
   user-select: none;
   z-index: 10;
+}
+
+/* ---- 时间轴 ---- */
+.scrubber {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 18px 14px;
+  background: linear-gradient(0deg, rgba(5, 10, 18, 0.95) 0%, rgba(5, 10, 18, 0.65) 75%, transparent 100%);
+  pointer-events: none; /* 渐变区本身不挡地图交互，只让控件可点 */
+  z-index: 10;
+}
+.scrubber > * {
+  pointer-events: auto;
+}
+
+.scrub-play {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: #dbe4f0;
+  font-size: 11px;
+  letter-spacing: 0;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.scrub-play:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+.scrub-play.on {
+  background: #4a9eff;
+  border-color: #4a9eff;
+  color: #0a1420;
+}
+
+.scrub-range {
+  flex: 1;
+  min-width: 0;
+  height: 4px;
+  border-radius: 2px;
+  appearance: none;
+  -webkit-appearance: none;
+  background:
+    linear-gradient(90deg, #4a9eff 0%, #3ac8ff var(--scrub-pct, 0%), rgba(255, 255, 255, 0.14) var(--scrub-pct, 0%));
+  cursor: pointer;
+  outline: none;
+}
+.scrub-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #e8f2ff;
+  border: 2px solid #0a1420;
+  box-shadow: 0 0 8px rgba(74, 158, 255, 0.7);
+  cursor: grab;
+}
+.scrub-range::-webkit-slider-thumb:active {
+  cursor: grabbing;
+  transform: scale(1.15);
+}
+.scrub-range::-moz-range-thumb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #e8f2ff;
+  border: 2px solid #0a1420;
+  box-shadow: 0 0 8px rgba(74, 158, 255, 0.7);
+  cursor: grab;
+}
+
+.scrub-time {
+  flex-shrink: 0;
+  min-width: 150px;
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: #b9cde6;
+  letter-spacing: 0.3px;
+  user-select: none;
 }

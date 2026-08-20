@@ -1,9 +1,8 @@
 import { Map } from 'maplibre-gl';
 import { WindLayer } from './WindLayer';
-import { makeSyntheticGrid } from '../lib/syntheticWind';
 
-// M0：暗色背景-only 底图（不依赖外部瓦片）+ 合成风粒子层
-// M1 之后换成 GFS 真实数据 / M4 加内置低缩放底图
+// M2：暗色背景-only 底图（不依赖外部瓦片）+ 风粒子层
+// 数据域由 manifest 决定（WindLayer 渲染时从 useTime store 读取），M4 加内置低缩放底图
 export function createMap(container: HTMLElement): Map {
   const map = new Map({
     container,
@@ -25,7 +24,7 @@ export function createMap(container: HTMLElement): Map {
   });
 
   map.on('load', () => {
-    map.addLayer(new WindLayer(makeSyntheticGrid()));
+    map.addLayer(new WindLayer());
   });
 
   return map;

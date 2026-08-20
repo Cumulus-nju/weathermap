@@ -16,10 +16,14 @@ void main() {
 // 共享：坐标变换 + 双线性采样（拼进各 pass）
 // 注意：u_m0/u_scale/u_p0/u_cssSize 只在 draw pass 用到，但必须声明在 COMMON，
 // 因为 UPDATE_FRAG 也包含 COMMON——GLSL 中 uniform 声明必须在函数引用之前。
+// u_wind0/u_wind1 + u_mix 实现时间轴交叉淡化：相邻两个时次的风场按 frac 混合。
 const COMMON = `
 uniform vec2 u_windSize;   // 风场纹理尺寸 (cols, rows)
 uniform vec2 u_domain;     // lon0, lat0
 uniform vec2 u_domainSpan; // (lon1-lon0, lat1-lat0)
+uniform sampler2D u_wind0; // 当前时次风场
+uniform sampler2D u_wind1; // 下一时次风场
+uniform float u_mix;       // 0..1 时次插值系数
 uniform vec2 u_m0;         // 参考点 mercator 坐标
 uniform vec2 u_scale;      // mercator->CSS px 缩放
 uniform vec2 u_p0;         // 参考点 CSS px
@@ -46,8 +50,8 @@ vec2 gridToClip(vec2 g) {
   return vec2(s.x / u_cssSize.x * 2.0 - 1.0, -(s.y / u_cssSize.y * 2.0 - 1.0));
 }
 
-// 双线性采样风场（NEAREST 纹理 + 手动插值）
-vec2 sampleWind(vec2 gridUV) {
+// 单纹理双线性采样（NEAREST 纹理 + 手动插值）
+vec2 sampleTex(sampler2D tex, vec2 gridUV) {
   vec2 tc = gridUV * u_windSize - 0.5;
   vec2 base = floor(tc);
   vec2 fr = fract(tc);
@@ -56,13 +60,18 @@ vec2 sampleWind(vec2 gridUV) {
   vec2 c10 = (base + vec2(1.0, 0.0) + 0.5) * inv;
   vec2 c01 = (base + vec2(0.0, 1.0) + 0.5) * inv;
   vec2 c11 = (base + vec2(1.0, 1.0) + 0.5) * inv;
-  vec2 w00 = texture(u_wind, c00).xy;
-  vec2 w10 = texture(u_wind, c10).xy;
-  vec2 w01 = texture(u_wind, c01).xy;
-  vec2 w11 = texture(u_wind, c11).xy;
+  vec2 w00 = texture(tex, c00).xy;
+  vec2 w10 = texture(tex, c10).xy;
+  vec2 w01 = texture(tex, c01).xy;
+  vec2 w11 = texture(tex, c11).xy;
   vec2 a = mix(w00, w10, fr.x);
   vec2 b = mix(w01, w11, fr.x);
   return mix(a, b, fr.y);
+}
+
+// 时间插值风场：当前时次与下一时次按 u_mix 交叉淡化
+vec2 sampleWind(vec2 gridUV) {
+  return mix(sampleTex(u_wind0, gridUV), sampleTex(u_wind1, gridUV), u_mix);
 }
 
 float hash1(float x) {
@@ -77,7 +86,6 @@ export const UPDATE_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
 out vec4 fragColor;
-uniform sampler2D u_wind;   // RGBA32F, R=u G=v
 uniform sampler2D u_state;  // 上一步粒子状态 (x,y,prevX,prevY)
 uniform float u_dt;         // 秒
 uniform float u_speed;      // 视觉速度倍率（物理 UV/s × 倍率）
@@ -104,7 +112,6 @@ export const DRAW_VERT = `#version 300 es
 precision highp float;
 in float a_index;  // 0..2N-1，偶数=prev 奇数=cur
 uniform sampler2D u_state;
-uniform sampler2D u_wind;
 uniform vec2 u_particleSize;
 uniform float u_maxSpeed;
 uniform float u_lineAlpha;

@@ -1,15 +1,25 @@
 import type { Map as MapLibreMap, CustomLayerInterface, CustomRenderMethodInput } from 'maplibre-gl';
 import { useWindSettings } from '../store';
-import { WindGrid, mercX, mercY, maxSpeed } from '../lib/grid';
+import { useTime } from '../lib/timeStore';
+import { buildGrid, type WindGrid, mercX, mercY } from '../lib/grid';
+import { loadBundleFile } from '../lib/wmb';
 import { COMPOSITE_FRAG, DRAW_FRAG, DRAW_VERT, FADE_FRAG, FULLSCREEN_VERT, UPDATE_FRAG } from './shaders';
 
 // 物理 m/s -> 网格UV/s 的视觉倍率：急流 30 m/s 约以 0.5%/秒 划过域（速度滑条在此基础上倍乘）
 const VISUAL_SPEED = 17000;
+// 配色归一化的最大风速（固定值让不同时次强度可比；M4 再做自适应色带）
+const COLOR_SPEED_MAX = 40;
+// 自动播放每个预报时次持续秒数（41 时次 ≈ 100 秒一圈）
+const SECONDS_PER_STEP = 2.5;
+// 解码网格 LRU 上限（防内存无限增长；当前+下+预取 ≈ 3 个足够）
+const MAX_GRIDS = 8;
 
 // MapLibre CustomLayerInterface 实现：WebGL2 风粒子层
 // 移植自 mapbox/webgl-wind（MIT）的 ping-pong 粒子算法
 // 渲染链：state 纹理 ping-pong（平流）→ trail 帧缓冲（fade+draw）→ 叠加回 MapLibre 帧缓冲
-// 限制：基于轴对齐 mercator 仿射投影，M0 禁用旋转/俯仰；M4 如需支持再改用矩阵
+// M2 时间轴：相邻两个时次的风场纹理（u_wind0/u_wind1）按 frac 在着色器里交叉淡化，
+// 拖动时间轴粒子丝滑过渡不跳变；异步预取下一对时次。
+// 限制：基于轴对齐 mercator 仿射投影，禁用旋转/俯仰。
 export class WindLayer implements CustomLayerInterface {
   id = 'wind';
   type = 'custom' as const;
@@ -17,8 +27,13 @@ export class WindLayer implements CustomLayerInterface {
 
   private map!: MapLibreMap;
   private gl!: WebGL2RenderingContext;
-  private grid: WindGrid;
-  private maxSpd = 1;
+  private disposed = false;
+
+  // 时次数据缓存：解码网格（CPU）与上传纹理（GPU），LRU 淘汰
+  private gridByFxx = new Map<number, WindGrid>();
+  private texByFxx = new Map<number, WebGLTexture>();
+  private pendingFxx = new Set<number>();
+  private baseFxx = -1; // 最新加载成功的时次（数据未就绪时的兜底）
 
   // 粒子状态 ping-pong：fboA→texA, fboB→texB（存 x,y,prevX,prevY）
   private particleTexSize = 1; // P×P，P = ceil(sqrt(N))
@@ -36,9 +51,6 @@ export class WindLayer implements CustomLayerInterface {
   private trailW = 0;
   private trailH = 0;
 
-  // 风场纹理
-  private windTex: WebGLTexture | null = null;
-
   // 程序 + 按 program 缓存的 uniform location
   private progUpdate!: WebGLProgram;
   private progDraw!: WebGLProgram;
@@ -54,18 +66,6 @@ export class WindLayer implements CustomLayerInterface {
   private lastFrame = 0;
   private lastDpr = 1;
 
-  constructor(grid: WindGrid) {
-    this.grid = grid;
-    this.maxSpd = maxSpeed(grid) || 1;
-  }
-
-  /** 换新时次网格（M2 时间轴用），风场纹理需重传 */
-  setGrid(g: WindGrid) {
-    this.grid = g;
-    this.maxSpd = maxSpeed(g) || 1;
-    if (this.windTex && this.gl) this.uploadWind();
-  }
-
   // ---- 生命周期 ----
   onAdd(map: MapLibreMap, gl: WebGLRenderingContext) {
     this.map = map;
@@ -75,18 +75,19 @@ export class WindLayer implements CustomLayerInterface {
     }
     this.buildPrograms();
     this.buildQuadVao();
-    this.uploadWind();
     this.ensureParticles();
     this.lastFrame = performance.now();
   }
 
   onRemove() {
+    this.disposed = true;
     const gl = this.gl;
     const dels: (WebGLTexture | WebGLFramebuffer | WebGLProgram | WebGLVertexArrayObject | null)[] = [
       this.progUpdate, this.progDraw, this.progFade, this.progComposite,
       this.texA, this.texB, this.fboA, this.fboB,
-      this.trailFbo, this.trailTex, this.windTex, this.vaoQuad, this.vaoLines,
+      this.trailFbo, this.trailTex, this.vaoQuad, this.vaoLines,
     ];
+    for (const tex of this.texByFxx.values()) dels.push(tex);
     for (const o of dels) {
       if (!o) continue;
       if (o instanceof WebGLTexture) gl.deleteTexture(o);
@@ -96,14 +97,38 @@ export class WindLayer implements CustomLayerInterface {
     }
     this.trailFbo = null;
     this.trailTex = null;
-    this.windTex = null;
+    this.texByFxx.clear();
   }
 
   // ---- 渲染主循环 ----
   render(_gl: WebGLRenderingContext, _options: CustomRenderMethodInput) {
     const gl = _gl as WebGL2RenderingContext; // MapLibre v5 内部已是 WebGL2，仅类型上未收窄
+    const now = performance.now();
+    const dt = Math.min((now - this.lastFrame) / 1000, 0.05);
+    this.lastFrame = now;
+
+    // 自动播放推进（风层关时时间轴也照走，scrubber 跟随）
+    const t0 = useTime.getState();
+    if (t0.playing && t0.manifest && t0.manifest.timesteps.length > 1) {
+      const n = t0.manifest.timesteps.length;
+      let v = t0.index + t0.frac + dt / SECONDS_PER_STEP;
+      if (v >= n) v = 0; // 播放到结尾回卷
+      const idx = Math.floor(v);
+      const fr = v - idx;
+      if (idx !== t0.index || fr !== t0.frac) useTime.setState({ index: idx, frac: fr });
+    }
+
     const s = useWindSettings.getState();
-    if (!s.enabled) return;
+    if (!s.enabled) {
+      // 关层时若仍在播放，保持时间轴走（触发 repaint 让 scrubber 更新）
+      if (t0.playing) this.map.triggerRepaint();
+      return;
+    }
+
+    const t = useTime.getState();
+    const manifest = t.manifest;
+    if (!manifest || manifest.timesteps.length === 0) return;
+    const { domain } = manifest;
 
     // 记录 MapLibre 当前绑定的帧缓冲，composite 时恢复——直接绑 null 会在多 pass 场景画丢
     const prevFbo = gl.getParameter(gl.FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
@@ -119,17 +144,44 @@ export class WindLayer implements CustomLayerInterface {
 
     if (s.particleCount !== this.lastCount) this.ensureParticles();
 
-    const now = performance.now();
-    const dt = Math.min((now - this.lastFrame) / 1000, 0.05);
-    this.lastFrame = now;
-
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.CULL_FACE);
+
+    // ---- 时间轴：当前/下一时次 + 预取 ----
+    const ts = manifest.timesteps;
+    const n = ts.length;
+    const i = Math.min(Math.max(t.index, 0), n - 1);
+    const f0 = ts[i];
+    const f1 = ts[(i + 1) % n];
+    const f2 = ts[(i + 2) % n];
+    this.ensure(f0.fxx);
+    this.ensure(f1.fxx);
+    this.ensure(f2.fxx);
+
+    // 数据未就绪时回退到最新加载的时次；两者都齐才做交叉淡化
+    const has0 = this.gridByFxx.has(f0.fxx);
+    const has1 = this.gridByFxx.has(f1.fxx);
+    const bFxx = has0 ? f0.fxx : has1 ? f1.fxx : this.baseFxx;
+    const nFxx = has1 ? f1.fxx : bFxx;
+    if (bFxx < 0 || !this.gridByFxx.has(bFxx)) {
+      // 数据还在加载：保持 repaint 让时间轴继续走，数据到位自动接上
+      if (t.playing) this.map.triggerRepaint();
+      return;
+    }
+    const mix = has0 && has1 ? t.frac : 0;
+
+    this.ensureTex(bFxx);
+    this.ensureTex(nFxx);
+    const tex0 = this.texByFxx.get(bFxx)!;
+    const tex1 = this.texByFxx.get(nFxx)!;
+    const g0 = this.gridByFxx.get(bFxx)!;
+    const windW = g0.cols;
+    const windH = g0.rows;
 
     // 投影参数（CSS 像素系；轴对齐，依赖禁旋转）
     const cssW = this.map.getCanvas().clientWidth || dw;
     const cssH = this.map.getCanvas().clientHeight || dh;
-    const { lon0, lat0, lon1, lat1 } = this.grid;
+    const { lon0, lat0, lon1, lat1 } = domain;
     const p0 = this.map.project([lon0, lat0]);
     const p1 = this.map.project([lon1, lat1]);
     const m0x = mercX(lon0), m0y = mercY(lat0);
@@ -143,15 +195,19 @@ export class WindLayer implements CustomLayerInterface {
     gl.viewport(0, 0, this.particleTexSize, this.particleTexSize);
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.stateWriteFbo);
     gl.useProgram(this.progUpdate);
-    gl.uniform1i(this.u(this.progUpdate, 'u_wind'), 0);
-    gl.uniform1i(this.u(this.progUpdate, 'u_state'), 1);
+    gl.uniform1i(this.u(this.progUpdate, 'u_wind0'), 0);
+    gl.uniform1i(this.u(this.progUpdate, 'u_wind1'), 1);
+    gl.uniform1i(this.u(this.progUpdate, 'u_state'), 2);
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.windTex);
+    gl.bindTexture(gl.TEXTURE_2D, tex0);
     gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, tex1);
+    gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, this.stateReadTex);
-    gl.uniform2f(this.u(this.progUpdate, 'u_windSize'), this.grid.cols, this.grid.rows);
+    gl.uniform2f(this.u(this.progUpdate, 'u_windSize'), windW, windH);
     gl.uniform2f(this.u(this.progUpdate, 'u_domain'), lon0, lat0);
     gl.uniform2f(this.u(this.progUpdate, 'u_domainSpan'), lon1 - lon0, lat1 - lat0);
+    gl.uniform1f(this.u(this.progUpdate, 'u_mix'), mix);
     gl.uniform1f(this.u(this.progUpdate, 'u_dt'), dt);
     gl.uniform1f(this.u(this.progUpdate, 'u_speed'), s.speed * VISUAL_SPEED);
     gl.disable(gl.BLEND);
@@ -171,19 +227,23 @@ export class WindLayer implements CustomLayerInterface {
     // ---- pass3: draw 粒子线段（叠加进 trail）----
     gl.useProgram(this.progDraw);
     gl.uniform1i(this.u(this.progDraw, 'u_state'), 0);
-    gl.uniform1i(this.u(this.progDraw, 'u_wind'), 1);
+    gl.uniform1i(this.u(this.progDraw, 'u_wind0'), 1);
+    gl.uniform1i(this.u(this.progDraw, 'u_wind1'), 2);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.stateReadTex);
     gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, this.windTex);
+    gl.bindTexture(gl.TEXTURE_2D, tex0);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, tex1);
     gl.uniform2f(this.u(this.progDraw, 'u_particleSize'), this.particleTexSize, this.particleTexSize);
-    gl.uniform1f(this.u(this.progDraw, 'u_maxSpeed'), this.maxSpd);
+    gl.uniform1f(this.u(this.progDraw, 'u_maxSpeed'), COLOR_SPEED_MAX);
     gl.uniform1f(this.u(this.progDraw, 'u_lineAlpha'), s.streak);
+    gl.uniform1f(this.u(this.progDraw, 'u_mix'), mix);
     gl.uniform2f(this.u(this.progDraw, 'u_m0'), m0x, m0y);
     gl.uniform2f(this.u(this.progDraw, 'u_scale'), scaleX, scaleY);
     gl.uniform2f(this.u(this.progDraw, 'u_p0'), p0.x, p0.y);
     gl.uniform2f(this.u(this.progDraw, 'u_cssSize'), cssW, cssH);
-    gl.uniform2f(this.u(this.progDraw, 'u_windSize'), this.grid.cols, this.grid.rows);
+    gl.uniform2f(this.u(this.progDraw, 'u_windSize'), windW, windH);
     gl.uniform2f(this.u(this.progDraw, 'u_domain'), lon0, lat0);
     gl.uniform2f(this.u(this.progDraw, 'u_domainSpan'), lon1 - lon0, lat1 - lat0);
     gl.blendFunc(gl.ONE, gl.ONE);
@@ -208,6 +268,71 @@ export class WindLayer implements CustomLayerInterface {
     gl.enable(gl.BLEND);
 
     this.map.triggerRepaint();
+  }
+
+  // ---- 时次数据加载 ----
+  private ensure(fxx: number) {
+    if (this.disposed || this.gridByFxx.has(fxx) || this.pendingFxx.has(fxx)) return;
+    const manifest = useTime.getState().manifest;
+    if (!manifest) return;
+    const step = manifest.timesteps.find((t) => t.fxx === fxx);
+    if (!step) return;
+    this.pendingFxx.add(fxx);
+    const level = useTime.getState().level;
+    loadBundleFile(step.file, [`u_${level}`, `v_${level}`])
+      .then((fields) => {
+        this.pendingFxx.delete(fxx);
+        if (this.disposed) return;
+        const u = fields[`u_${level}`];
+        const v = fields[`v_${level}`];
+        if (!u || !v) throw new Error(`字段缺失 u_${level}/v_${level}`);
+        const manifest = useTime.getState().manifest;
+        if (!manifest) return;
+        const g = buildGrid(manifest.domain, u, v, step.validTime);
+        this.gridByFxx.set(fxx, g);
+        this.baseFxx = fxx;
+        this.evictLru();
+      })
+      .catch((err) => {
+        this.pendingFxx.delete(fxx);
+        console.warn(`WindLayer: 时次 f${fxx} 加载失败`, err);
+      });
+  }
+
+  private evictLru() {
+    const gl = this.gl;
+    while (this.gridByFxx.size > MAX_GRIDS) {
+      const oldest = this.gridByFxx.keys().next().value;
+      if (oldest === undefined) break;
+      this.gridByFxx.delete(oldest);
+      const tex = this.texByFxx.get(oldest);
+      if (tex) gl.deleteTexture(tex);
+      this.texByFxx.delete(oldest);
+    }
+  }
+
+  private gridToWindData(g: WindGrid): Float32Array {
+    const data = new Float32Array(g.cols * g.rows * 4);
+    for (let k = 0; k < g.cols * g.rows; k++) {
+      data[k * 4] = g.u[k];
+      data[k * 4 + 1] = g.v[k];
+    }
+    return data;
+  }
+
+  private ensureTex(fxx: number) {
+    if (this.texByFxx.has(fxx)) return;
+    const g = this.gridByFxx.get(fxx);
+    if (!g) return;
+    const gl = this.gl;
+    const tex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, g.cols, g.rows, 0, gl.RGBA, gl.FLOAT, this.gridToWindData(g));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    this.texByFxx.set(fxx, tex);
   }
 
   // ---- GL 初始化 ----
@@ -380,22 +505,5 @@ export class WindLayer implements CustomLayerInterface {
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  }
-
-  private uploadWind() {
-    const gl = this.gl;
-    const { cols, rows, u, v } = this.grid;
-    const data = new Float32Array(cols * rows * 4);
-    for (let i = 0; i < cols * rows; i++) {
-      data[i * 4] = u[i];
-      data[i * 4 + 1] = v[i];
-    }
-    if (!this.windTex) this.windTex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, this.windTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, cols, rows, 0, gl.RGBA, gl.FLOAT, data);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   }
 }
