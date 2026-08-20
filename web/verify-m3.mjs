@@ -1,4 +1,5 @@
 // M3 无头验收：气压层芯片 → 切换 300 hPa → 读数卡（风速/温度等双线性采样 + 播放头插值）
+// 读数卡依赖 (层,时次) 网格解码缓存就绪，本地/线上速度差异大 → 用轮询等待而非固定 sleep。
 import { chromium } from 'playwright';
 
 const url = process.argv[2] || 'http://localhost:5173/';
@@ -33,16 +34,26 @@ console.log('芯片齐全:', hasAll ? '✓' : '✗');
 // 默认层 850 应高亮 + 水印 850 hPa
 const activeDefault = await page.$$eval('.level-chip.on', (els) => els.map((e) => e.textContent).join(','));
 console.log(`默认高亮: ${activeDefault}  ${activeDefault.includes('850') ? '✓' : '✗'}`);
-console.log('水印默认层:', await page.locator('.watermark').textContent());
 
-// 2) 等初始数据加载，悬停地图中心 → 读数卡出现
-await page.waitForTimeout(5000);
+// 2) 悬停地图中心 → 轮询读数卡出现（每 1.5s 挪 1px 触发新 mousemove，绕过地图初始化期事件丢失；
+//    网格解码就绪后 20Hz 采样会自动补上）
 const box = await page.locator('.map-container').boundingBox();
-await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-await page.waitForTimeout(2500); // 等 20Hz 采样 + 网格就绪
-const cardVisible = (await page.locator('.value-card').count()) > 0;
-console.log('读数卡出现:', cardVisible ? '✓' : '✗');
-if (cardVisible) {
+const cx = box.x + box.width / 2;
+const cy = box.y + box.height / 2;
+async function poll(condFn, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let i = 0;
+  while (Date.now() < deadline) {
+    if (await page.evaluate(condFn)) return true;
+    await page.mouse.move(cx + (i % 3), cy + ((i % 2) * 2)); // 小范围挪动触发 mousemove
+    i++;
+    await page.waitForTimeout(1500);
+  }
+  return false;
+}
+const cardOk = await poll(() => !!document.querySelector('.value-card'), 25000);
+console.log('读数卡出现:', cardOk ? '✓' : '✗');
+if (cardOk) {
   const cardText = await page.locator('.value-card').innerText();
   console.log('--- 850 hPa 读数卡 ---');
   console.log(cardText.replace(/\n/g, ' | '));
@@ -61,16 +72,13 @@ console.log('水印 → 300 hPa:', w300 ? '✓' : '✗');
 const active300 = await page.$$eval('.level-chip.on', (els) => els.map((e) => e.textContent).join(','));
 console.log('高亮芯片:', active300, active300.includes('300') ? '✓' : '✗');
 
-// 4) 等 300 hPa 数据（解码+上传纹理），再悬停刷新读数卡，层标签应变
-await page.waitForTimeout(6000);
-await page.mouse.move(box.x + box.width / 2 + 5, box.y + box.height / 2 + 5); // 挪一点触发新 mousemove
-await page.waitForTimeout(2000);
-const cardLevel = await page.locator('.vc-level').textContent().catch(() => null);
-console.log(`读数卡层: ${cardLevel}  ${cardLevel?.includes('300') ? '✓' : '✗'}`);
-if (cardLevel) {
-  const speed = await page.locator('.vc-wind .vc-val').textContent();
-  console.log('300 hPa 风速:', speed);
-}
+// 4) 轮询等读数卡层标签变 300 hPa（300 网格解码就绪；挪鼠标保证 mousemove 持续触发）
+const lv300 = await poll(
+  () => document.querySelector('.value-card .vc-level')?.textContent?.includes('300') ?? false,
+  30000,
+);
+console.log('读数卡 → 300 hPa:', lv300 ? '✓' : '✗');
+if (lv300) console.log('300 hPa 风速:', await page.locator('.vc-wind .vc-val').textContent());
 
 await page.screenshot({ path: shot });
 
