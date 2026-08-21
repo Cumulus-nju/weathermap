@@ -322,6 +322,10 @@ body,
 .legend-iso {
   color: #8aa0bd;
   font-weight: 400;
+  /* M7-4.3 等值线副标题换行显示，避免标题变宽把图例撑成 151px 横条
+     挡住地图（用户报告的"神秘边框"）。 */
+  display: block;
+  margin-top: 2px;
 }
 
 .legend-row {

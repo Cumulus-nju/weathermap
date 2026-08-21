@@ -87,7 +87,7 @@ export function Legend() {
           </span>
         )}
         {state.iso && (
-          <span className="legend-iso">{state.cmap ? ` · ${ISO_LABEL[state.cmap.id as Exclude<OverlayField, 'off'>]}` : ISO_LABEL.pressure}</span>
+          <span className="legend-iso">{state.cmap ? ISO_LABEL[state.cmap.id as Exclude<OverlayField, 'off'>] : ISO_LABEL.pressure}</span>
         )}
       </div>
       <div className="legend-row">
