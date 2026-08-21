@@ -62,6 +62,11 @@ export class WindLayer implements CustomLayerInterface {
   private lastFrame = 0;
   private lastDpr = 1;
 
+  // 上一帧投影（判断地图是否在移动：平移/缩放时旧 trail 是屏幕空间积累，须清空防拖影暂留）
+  private lastP0 = { x: NaN, y: NaN };
+  private lastScaleX = NaN;
+  private lastScaleY = NaN;
+
   // M4-2 动态粒子数：EMA 估 FPS，自动模式定期升降粒子数以维持 ~35fps（弱机/软渲染自适应）
   private fpsEma = 0;
   private governTimer = 0;
@@ -138,8 +143,9 @@ export class WindLayer implements CustomLayerInterface {
       this.governTimer = 0;
       const cur = s.particleCount;
       let next = cur;
+      // 只降不猛升：弱机降数保帧率；强机需明显富余(>60fps)才回升、上限 80k（保持简洁观感，不像原来拉到 200k 糊满屏）
       if (this.fpsEma < 28) next = Math.max(10_000, Math.round(cur * 0.6));
-      else if (this.fpsEma > 50 && cur < 200_000) next = Math.min(200_000, Math.round(cur * 1.4));
+      else if (this.fpsEma > 60 && cur < 80_000) next = Math.min(80_000, Math.round(cur * 1.4));
       if (next !== cur) s.setParticleCount(next);
     }
 
@@ -210,8 +216,25 @@ export class WindLayer implements CustomLayerInterface {
     const scaleX = (p1.x - p0.x) / (m1x - m0x);
     const scaleY = (p1.y - p0.y) / (m1y - m0y);
 
+    // 地图在移动（平移/缩放）？旧 trail 是屏幕空间积累，与新投影错位 → 清空避免拖影/暂留。
+    // 缩放/平移期间每帧都清 → 粒子以干净短线呈现（Windy 同款），停下后尾迹重新累积。
+    const moved =
+      Number.isNaN(this.lastP0.x) ||
+      Math.abs(p0.x - this.lastP0.x) > 0.5 ||
+      Math.abs(p0.y - this.lastP0.y) > 0.5 ||
+      Math.abs(scaleX - this.lastScaleX) > 1e-4 ||
+      Math.abs(scaleY - this.lastScaleY) > 1e-4;
+    this.lastP0 = { x: p0.x, y: p0.y };
+    this.lastScaleX = scaleX;
+    this.lastScaleY = scaleY;
+
     // ---- pass1: update（平流粒子）----
     this.ensureTrail(dw, dh);
+    if (moved) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.trailFbo!);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
     this.swapState(); // 读上一轮写入的、写另一块
     gl.viewport(0, 0, this.particleTexSize, this.particleTexSize);
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.stateWriteFbo);

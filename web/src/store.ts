@@ -22,11 +22,12 @@ interface WindSettings {
 
 export const useWindSettings = create<WindSettings>((set) => ({
   enabled: true,
-  particleCount: 100_000,
+  // 简洁明了：60k 默认（Windy 风格可见独立流线），fade 0.96 尾迹适中；弱机由 governor 自动降数
+  particleCount: 60_000,
   autoParticles: true,
   palette: 0,
   speed: 1,
-  fade: 0.97,
+  fade: 0.96,
   streak: 1,
   setEnabled: (enabled) => set({ enabled }),
   setParticleCount: (particleCount) => set({ particleCount }),

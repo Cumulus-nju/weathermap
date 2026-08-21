@@ -133,10 +133,17 @@ void main() {
   float pIdx = floor(a_index * 0.5);
   float isHead = mod(a_index, 2.0);
   vec4 st = texture(u_state, idxToUV(pIdx));
-  vec2 pos = isHead > 0.5 ? st.xy : st.zw;
+  vec2 cur = st.xy;
+  vec2 prev = st.zw;
+  // 跨域重定位的粒子（prev→cur 一跳很远）退化为零长线段：粒子直接出现在新位置，
+  // 避免从边界到域内随机点的满屏拉丝。正常平流单帧位移远小于 0.25 UV
+  // （上限≈0.18 UV @ 速度滑条4×/80m/s 急流/dt 0.05），只有 reset 才跳 ≥0.3。
+  float abnorm = step(0.25, length(cur - prev));
+  vec2 pos = isHead > 0.5 ? cur : mix(prev, cur, abnorm);
   gl_Position = vec4(gridToClip(pos), 0.0, 1.0);
   vec2 wind = sampleWind(st.xy);
   v_speed01 = clamp(length(wind) / u_maxSpeed, 0.0, 1.0);
+
 }
 `;
 
