@@ -5,7 +5,7 @@ import { useOverlay, useUnits, SURFACE_ONLY, type OverlayField } from '../store'
 import { useTime } from '../lib/timeStore';
 import { getGrid } from '../lib/dataLoader';
 import type { Level } from '../lib/grid';
-import { ISO_INTERVAL } from '../lib/colormaps';
+import { ISO_INTERVAL, ISO_SMOOTH } from '../lib/colormaps';
 import { tempFromK } from '../lib/units';
 import { FIELD_KEY, type FieldKey } from '../map/ColorLayer';
 
@@ -78,18 +78,40 @@ export function IsoLabels() {
       // 与着色器 u_mix 同源的双时次插值场
       const frac = t.frac;
       const vals = new Float64Array(cols * rows);
-      let lo = Infinity;
-      let hi = -Infinity;
       for (let k = 0; k < vals.length; k++) {
-        const v = d0[k] * (1 - frac) + d1[k] * frac;
-        vals[k] = v;
-        if (v < lo) lo = v;
-        if (v > hi) hi = v;
+        vals[k] = d0[k] * (1 - frac) + d1[k] * frac;
       }
-      // 等值面 = interval 的整数倍（与 shader fract(iso/interval) 对齐）
+      // M7-4.2 与 GPU sampleFieldSmooth 同源的可调半径盒平均（边缘 clamp，半径=ISO_SMOOTH）：
+      // 整数场(云量/降水)等值线若走原始格值会沿格点边界围出蜂巢状小环，平滑后
+      // 等值线位置与着色器完全一致（不重采样而是逐格平均，再喂 d3-contour）。
+      const radius = ISO_SMOOTH[field === 'off' ? 'pressure' : field];
+      const sm = new Float64Array(cols * rows);
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          let sum = 0;
+          let cnt = 0;
+          for (let j = -radius; j <= radius; j++) {
+            const yj = Math.min(Math.max(y + j, 0), rows - 1);
+            const r0 = yj * cols;
+            for (let i = -radius; i <= radius; i++) {
+              const xi = Math.min(Math.max(x + i, 0), cols - 1);
+              sum += vals[r0 + xi];
+              cnt++;
+            }
+          }
+          sm[y * cols + x] = sum / cnt;
+        }
+      }
+      // 等值面 = interval 的整数倍（与 shader fract(iso/interval) 对齐）——用平滑场的量程
+      let slo = Infinity;
+      let shi = -Infinity;
+      for (let k = 0; k < sm.length; k++) {
+        if (sm[k] < slo) slo = sm[k];
+        if (sm[k] > shi) shi = sm[k];
+      }
       const interval = ISO_INTERVAL[field === 'off' ? 'pressure' : field];
       const levels: number[] = [];
-      for (let L = Math.ceil(lo / interval) * interval; L <= hi; L += interval) levels.push(L);
+      for (let L = Math.ceil(slo / interval) * interval; L <= shi; L += interval) levels.push(L);
       if (levels.length === 0) {
         labelsRef.current = [];
         lastKeyRef.current = key;
@@ -98,7 +120,7 @@ export function IsoLabels() {
       const polys = contours()
         .size([cols, rows])
         .thresholds(levels)
-        .smooth(true)(vals as unknown as number[]);
+        .smooth(true)(sm as unknown as number[]);
 
       const { lon0, lat0, lon1, lat1 } = m.domain;
       const cands: Label[] = [];

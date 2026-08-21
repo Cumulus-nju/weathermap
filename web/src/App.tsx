@@ -36,6 +36,7 @@ export default function App() {
     mapRef.current = map;
     setMap(map); // M5 CitySearch 通过模块级引用 flyTo
     (window as any).__map = map; // e2e 验收用
+    (window as any).__time = useTime; // e2e 验收用（初始时刻等）——HMR 下动态 import 会拿到另一 store 实例
 
     // M3 读数卡：指针移动写入 pointerStore（ValueCard 用自己的 rAF 循环节流读取）
     map.on('mousemove', (e: MapMouseEvent) => {
@@ -62,6 +63,35 @@ export default function App() {
     });
     document.body.dataset.theme = useTheme.getState().theme;
     return () => sub();
+  }, []);
+
+  // M7-4.2 鼠标移到地图外（页面顶端/底端的控件、内边栏等覆盖层）隐藏读数卡：
+  // MapLibre 的 map.mouseleave 只在指针离开 canvas 元素时触发；pointer-events:none 的
+  // 覆盖层（scrubber 渐变区等）指针穿透到 canvas，移上去不触发 leave → 读数卡残留。
+  // document mousemove 双条件判定"指针在地图外"：
+  //   1) elementFromPoint 命中非 canvas 元素（交互覆盖层，pointer-events:auto）
+  //   2) 指针落在页面 chrome 覆盖层的几何矩形内（含 pointer-events:none 的渐变区，
+  //      如 TimeScrubber 底部条背景）——用 getBoundingClientRect 补 elementFromPoint 的盲区。
+  // 地图内部覆盖层（读数卡/城市标注/等值线标注，pointer-events:none）不在 chrome 名单，
+  // 指针落在其上视为"还在图上"，读数卡保持。
+  useEffect(() => {
+    const onDocMove = (e: MouseEvent) => {
+      const canvas = mapRef.current?.getCanvas();
+      if (!canvas) return;
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const overCanvas = el === canvas || canvas.contains(el as Node);
+      const overChrome = Array.from(document.querySelectorAll<HTMLElement>(
+        '.panel, .fps-badge, .data-badge, .city-search, .scrubber, .legend, .watermark',
+      )).some((c) => {
+        const r = c.getBoundingClientRect();
+        return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+      });
+      if ((!overCanvas || overChrome) && usePointer.getState().visible) {
+        usePointer.getState().leave();
+      }
+    };
+    document.addEventListener('mousemove', onDocMove);
+    return () => document.removeEventListener('mousemove', onDocMove);
   }, []);
 
   return (

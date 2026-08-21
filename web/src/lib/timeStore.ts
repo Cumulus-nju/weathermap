@@ -29,8 +29,25 @@ export const useTime = create<TimeState>((set) => ({
   level: DEFAULT_LEVEL,
   index: 0,
   frac: 0,
-  playing: true,
-  setManifest: (manifest) => set({ manifest }),
+  // M7-4.2 默认不自动播放（用户要求"先不要播放时间"，进来看初始时刻静态图，点播放才动）
+  playing: false,
+  setManifest: (manifest) => {
+    // M7-4.2 初始播放头 = 距"现在"最近的时次（Windy 同款：进来看当前时刻附近的预报，
+    // 而不是从 f000 开始）。validTime 为 UTC ISO，与 Date.now() 直接比较。
+    let index = 0;
+    if (manifest.timesteps.length) {
+      const now = Date.now();
+      let best = Infinity;
+      manifest.timesteps.forEach((ts, i) => {
+        const dt = Math.abs(new Date(ts.validTime).getTime() - now);
+        if (dt < best) {
+          best = dt;
+          index = i;
+        }
+      });
+    }
+    set({ manifest, index, frac: 0 });
+  },
   setLevel: (level) => set({ level }),
   setPlayhead: (index, frac) => set({ index, frac }),
   togglePlay: () => set((s) => ({ playing: !s.playing })),

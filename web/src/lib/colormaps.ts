@@ -162,6 +162,13 @@ export const ISO_INTERVAL: Record<Exclude<OverlayField, 'off'>, number> = {
   tcdc: 20, lcdc: 20, mcdc: 20, hcdc: 20, // 20%
   pressure: 400, // 4 hPa（Pa）
 };
+/** M7-4.2 等值线平滑半径：整数场(云量/降水)格值量化严重，等值线会沿格点边界围出
+ * 蜂巢状伪影，需更强平滑(5x5)；浮点场(温度/气压等)本身平滑，3x3 即可。 */
+export const ISO_SMOOTH: Record<Exclude<OverlayField, 'off'>, number> = {
+  temp: 1, rh: 1, gust: 1, dpt: 1, pressure: 1,
+  apcp: 2, tcdc: 2, lcdc: 2, mcdc: 2, hcdc: 2,
+};
+
 /** 图例里"等值线"副标题（等压线沿用旧称呼） */
 export const ISO_LABEL: Record<Exclude<OverlayField, 'off'>, string> = {
   temp: '等值线 5℃',

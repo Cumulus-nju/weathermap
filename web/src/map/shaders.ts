@@ -296,6 +296,10 @@ float sampleField(sampler2D tex, vec2 uv) {
   return mix(mix(v00, v10, fr.x), mix(v01, v11, fr.x), fr.y);
 }
 
+// M7-4.2 等值线平滑改在 CPU 上传纹理时完成（ensureFieldTex box 平均 + shader 双线性采样）：
+// 云量/降水是整数场，原始格值即平台值，等值线会紧贴 0.25° 格点边界围出蜂巢/格点状伪影；
+// 把"盒平均后的平滑场"双线性插值 → 等值线成为连续曲线，不再沿格边界走。IsoLabels 用同源
+// 平滑场跑 d3-contour（marching squares 线性插值 ≈ 双线性），标注与线位置一致。
 void main() {
   vec4 acc = vec4(0.0);  // 预乘 alpha 累积，等压线叠加在色斑上
   if (u_mode != 1) {
@@ -305,13 +309,25 @@ void main() {
     acc = vec4(c.rgb * c.a * u_opacity, c.a * u_opacity);
   }
   if (u_mode != 0) {
-    // 等压线：以"值/间隔"的周期余数距离定线宽，fwidth 换算屏幕像素 → 抗锯齿 ~1px 线
+    // 等值线：以"值/间隔"的周期余数距离定线宽，fwidth 换算屏幕像素 → 抗锯齿 ~1px 线
+    // iso 纹理已由 CPU 盒平均（整数场 5x5 / 浮点场 3x3），双线性采样 → 连续曲线
     float iso = mix(sampleField(u_iso0, v_uv), sampleField(u_iso1, v_uv), u_mix);
     float t = iso / u_isoInterval;
+    // M7-4.2 格点状伪影修复：云量/降水是整数场，大量格值恰为 interval 整数倍
+    // （降水 100%、总云 51.6%），平坦格内 fwidth≈0 → dpx≈0 → 整个格被当成"在线上"涂满，
+    // 形成覆盖大片区域的网格状纹理。只画"像素足迹内确实穿越等值线"的片元：
+    //   crossed = floor(thi)-floor(tlo)，footprint [t-fw/2, t+fw/2] 含整数倍才为 1。
+    //   ⚠️ crossed 用不 clamp 的 fwidth：平坦格 fwidth 精确为 0 → crossed=0 被排除；
+    //   若 clamp 成 1e-4，平坦格 footprint 会跨过整数倍(4.00005-3.99995)又画出线。
+    // 真实穿越片元 crossed=1 时按原公式画 ~1px 抗锯齿线（浮点场温度/气压观感不变）。
+    float fw = fwidth(t);
+    float tlo = t - fw * 0.5;
+    float thi = t + fw * 0.5;
+    float crossed = step(0.5, floor(thi) - floor(tlo));
     float f = fract(t);
     float d = min(f, 1.0 - f);              // 距最近等值线的距离（0..0.5）
-    float dpx = d / max(fwidth(t), 1e-4);   // 换算成屏幕像素
-    float line = 1.0 - smoothstep(0.4, 1.2, dpx);
+    float dpx = d / max(fw, 1e-4);          // 换算成屏幕像素（crossed=0 时结果被乘掉）
+    float line = crossed * (1.0 - smoothstep(0.4, 1.2, dpx));
     float a = line * u_opacity;
     acc += vec4(u_isoColor * a, a);
   }

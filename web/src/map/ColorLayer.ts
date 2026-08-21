@@ -3,7 +3,7 @@ import { useOverlay, useTheme, SURFACE_ONLY, type OverlayField } from '../store'
 import { useTime } from '../lib/timeStore';
 import { ensureGrid, getGrid, getGridByKey } from '../lib/dataLoader';
 import { mercX, mercY, type WindGrid } from '../lib/grid';
-import { CMAPS, cmapToPixels, fieldValueRange, ISO_INTERVAL } from '../lib/colormaps';
+import { CMAPS, cmapToPixels, fieldValueRange, ISO_INTERVAL, ISO_SMOOTH } from '../lib/colormaps';
 import { OVERLAY_VERT, OVERLAY_FRAG } from './shaders';
 
 // M4 色斑叠加层：温度/湿度/降水半透明色斑，画在风粒子下层。
@@ -129,23 +129,28 @@ export class ColorLayer implements CustomLayerInterface {
       range = fieldValueRange(colorField!, [g0, g1]);
     }
 
-    // 等值线分支（mode 0 跳过）：mode 2 复用色斑纹理（等值线=当前图层），
+    // 等值线分支（mode 0 跳过）：mode 2 等值线=当前图层字段（独立平滑纹理，不污染色斑），
     // mode 1（仅等值线、无色斑）回退 prmsl 等压线（默认）
-    let isoTex0 = colorTex0;
-    let isoTex1 = colorTex1;
-    let isoGrid = cGrid;
-    let i0 = g0;
-    let i1 = g1;
-    if (mode === 1) {
-      ensureGrid('sfc', f0.fxx);
-      ensureGrid('sfc', f1.fxx);
-      i0 = getGrid('sfc', f0.fxx);
-      i1 = getGrid('sfc', f1.fxx);
+    let isoTex0: WebGLTexture | undefined;
+    let isoTex1: WebGLTexture | undefined;
+    let isoGrid: WindGrid | undefined;
+    let i0: WindGrid | undefined;
+    let i1: WindGrid | undefined;
+    if (mode !== 0) {
+      const isoField: FieldKey = colorField ? FIELD_KEY[colorField] : 'prmsl';
+      const lvl = mode === 1 ? 'sfc' : t.level;
+      ensureGrid(lvl, f0.fxx);
+      ensureGrid(lvl, f1.fxx);
+      i0 = getGrid(lvl, f0.fxx);
+      i1 = getGrid(lvl, f1.fxx);
       isoGrid = i0 ?? i1;
       if (!isoGrid) return;
-      if (!i0?.prmsl && !i1?.prmsl) return;
-      isoTex0 = this.ensureFieldTex('prmsl', 'sfc', f0.fxx);
-      isoTex1 = this.ensureFieldTex('prmsl', 'sfc', f1.fxx);
+      if (!i0?.[isoField] && !i1?.[isoField]) return;
+      // M7-4.2 等值线用盒平均后的平滑纹理（半径=ISO_SMOOTH：整数场 5x5 / 浮点场 3x3），
+      // 与 IsoLabels 的 CPU 平滑同源；色斑纹理保持原始格值。
+      const smooth = ISO_SMOOTH[colorField ?? 'pressure'];
+      isoTex0 = this.ensureFieldTex(isoField, lvl, f0.fxx, smooth);
+      isoTex1 = this.ensureFieldTex(isoField, lvl, f1.fxx, smooth);
       if (!isoTex0 && !isoTex1) return;
     }
     const bGrid = cGrid ?? isoGrid!;
@@ -215,13 +220,16 @@ export class ColorLayer implements CustomLayerInterface {
   }
 
   // ---- 字段纹理（RGBA32F，值放 R 通道；NEAREST 过滤，着色器内手动双线性）----
+  // smooth>0：上传前做 (2smooth+1)² 盒平均（等值线专用，消除整数场格点/蜂巢伪影）；
+  // 平滑纹理与原始纹理分 key 缓存（色斑用原始，等值线用平滑），互不污染。
   private ensureFieldTex(
     field: FieldKey,
     level: number | 'sfc',
     fxx: number,
+    smooth = 0,
   ): WebGLTexture | undefined {
     const gridKey = `${level}:${fxx}`;
-    const key = `${field}|${gridKey}`;
+    const key = `${smooth ? 'S' : 'R'}|${field}|${gridKey}`;
     const hit = this.texByKey.get(key);
     if (hit) return hit.tex;
     const g = getGrid(level, fxx);
@@ -229,7 +237,26 @@ export class ColorLayer implements CustomLayerInterface {
     if (!g || !data) return undefined; // 网格未就绪（异步加载中），下一帧重试
     const gl = this.gl;
     const rgba = new Float32Array(g.cols * g.rows * 4);
-    for (let i = 0; i < data.length; i++) rgba[i * 4] = data[i];
+    if (smooth) {
+      // 盒平均（边缘 clamp），与 IsoLabels 的 CPU 平滑同源
+      for (let y = 0; y < g.rows; y++) {
+        for (let x = 0; x < g.cols; x++) {
+          let sum = 0;
+          let cnt = 0;
+          for (let j = -smooth; j <= smooth; j++) {
+            const yj = Math.min(Math.max(y + j, 0), g.rows - 1);
+            const r0 = yj * g.cols;
+            for (let i = -smooth; i <= smooth; i++) {
+              sum += data[r0 + Math.min(Math.max(x + i, 0), g.cols - 1)];
+              cnt++;
+            }
+          }
+          rgba[(y * g.cols + x) * 4] = sum / cnt;
+        }
+      }
+    } else {
+      for (let i = 0; i < data.length; i++) rgba[i * 4] = data[i];
+    }
     const tex = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, g.cols, g.rows, 0, gl.RGBA, gl.FLOAT, rgba);
