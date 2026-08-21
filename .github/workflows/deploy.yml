@@ -53,10 +53,11 @@ jobs:
         run: pip install -e .
 
       - name: 下载并编码 GFS 数据
+        # 定时触发时 inputs 为空串，用 || 兜底默认值（workflow_dispatch 的 default 不作用于 schedule）
         run: |
           python -m pipeline.run --latest \
-            --fxx "${{ inputs.fxx }}" \
-            --source "${{ inputs.source }}" \
+            --fxx "${{ inputs.fxx || '0:120:3' }}" \
+            --source "${{ inputs.source || 'nomads' }}" \
             --out web/public/data
 
       - name: 安装 Node
