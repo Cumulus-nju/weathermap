@@ -116,11 +116,15 @@ void main() {
   // 每个粒子按"时间相位+位置哈希"平均每 u_reseedPeriod 秒随机重生一次，全局覆盖一直均匀（Windy 同款）。
   // 相位跨整周期即触发：phase 随 u_elapsed 每周期 0→1 走一次，落在 [0, dt/L] 窗口就重生。
   float agePhase = fract(u_elapsed / u_reseedPeriod + hash1(pos.x * 3.1 + pos.y * 7.7 + 0.13));
-  if (newPos.x < 0.0 || newPos.x > 1.0 || newPos.y < 0.0 || newPos.y > 1.0
-      || agePhase < u_dt / u_reseedPeriod) {
+  bool doReseed = (newPos.x < 0.0 || newPos.x > 1.0 || newPos.y < 0.0 || newPos.y > 1.0
+      || agePhase < u_dt / u_reseedPeriod);
+  if (doReseed) {
     newPos = vec2(hash1(pos.x * 3.1 + 0.13), hash1(pos.y * 7.7 + 0.57));
   }
-  fragColor = vec4(newPos, pos);
+  // M7-3 重生点 prev=cur → 线段零长，杜绝任何距离的拉丝：
+  // reseed 跳变 <0.25 UV 时 DRAW_VERT 的 abnorm 阈值拦不住，高 zoom 下 UV 小跳就是全屏长线。
+  // 重生瞬间把 prev 也置为新位置，粒子上帧路径(旧 prev)不参与画线。
+  fragColor = vec4(newPos, doReseed ? newPos : pos);
 }
 `;
 

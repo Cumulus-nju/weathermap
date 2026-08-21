@@ -1,6 +1,6 @@
 // M6 城市标注 + 海岸线验收（真 GPU d3d11）：
-//   1) 默认视角(M7-2 正好覆盖中国 73.5-135°E, zoom≈3.6)出现 tier0 城市标注
-//      含 北京/上海/香港/台北/首尔/新德里；东京在帧缘可见属正常（不暴露数据边界）
+//   1) 默认视角(M7-3 聚焦东部中国 100-135°E, zoom≈4)出现 40+ 城市标注
+//      含 北京/上海/香港/台北/首尔/东京 + 常驻 tier1；新德里(77.2°E)在帧外
 //   2) 标注位置 ≈ map.project 投影位置（错位 <8px）
 //   3) 亮色主题切回后标注仍在、颜色按主题
 //   4) flyTo 北京 zoom6 → 更多标注（tier1 城市出现）
@@ -34,12 +34,13 @@ const labels = await page.evaluate(() =>
   [...document.querySelectorAll('.city-label')].map((el) => el.textContent),
 );
 console.log(`  标签(${labels.length}): ${labels.slice(0, 40).join(' ')}`);
-check('出现标注', labels.length >= 6, `count=${labels.length}`);
-// 中国框(73.5-135°E)内的 tier0 城市必现；东京(139.7E)/孟买(72.9E)在帧缘可见属正常
-// （数据域到 150°E/60°E，横向帧 66.7-141.9°E 不暴露数据边界）
-for (const c of ['北京', '上海', '香港', '台北', '首尔', '新德里']) {
+check('出现标注', labels.length >= 20, `count=${labels.length}`);
+// 东部中国(100-135°E, zoom≈4)内 tier0 城市 + 常驻 tier1 城市必现；
+// 新德里(77.2°E)在帧外（横向帧西缘 ~87°E，乌鲁木齐/拉萨在缘内属正常）
+for (const c of ['北京', '上海', '香港', '台北', '首尔', '东京', '成都', '武汉', '西安', '哈尔滨']) {
   check(`含 ${c}`, labels.includes(c));
 }
+check('新德里不在帧内', !labels.includes('新德里'), `count=${labels.length}`);
 
 // ---- 2) 位置对齐 ----
 console.log('-- 2. 标注位置对齐 --');
