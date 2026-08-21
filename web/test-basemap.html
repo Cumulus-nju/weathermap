@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <style>html,body{margin:0;height:100%}#m{position:absolute;inset:0}</style>
+</head>
+<body>
+  <div id="m"></div>
+  <script type="module">
+    import { Map } from 'maplibre-gl';
+    import landTopo from 'world-atlas/land-50m.json';
+    import { feature } from 'topojson-client';
+    import { darkBasemapStyle } from '/src/lib/basemap.ts';
+
+    const params = new URLSearchParams(location.search);
+    const ringIdx = parseInt(params.get('ring') || '', 10);
+    const mode = params.get('mode') || '';
+    const land = feature(landTopo, landTopo.objects.land);
+    const allRings = land.features[0].geometry.coordinates;
+    const lo = parseInt(params.get('lo') || '', 10);
+    const hi = parseInt(params.get('hi') || '', 10);
+    let data;
+    if (!Number.isNaN(lo) && !Number.isNaN(hi)) {
+      const rings = allRings.slice(lo, hi + 1);
+      data = {
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', properties: {}, geometry: { type: 'MultiPolygon', coordinates: rings } }],
+      };
+    } else if (!Number.isNaN(ringIdx)) {
+      data = {
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', properties: {}, geometry: { type: 'MultiPolygon', coordinates: [allRings[ringIdx]] } }],
+      };
+    } else if (mode === 'gridtest') {
+      // 在多个经度放小正方形，看畸变规律
+      const sqs = [100, 110, 120, 130, 140, 150].map((lon) => [[[lon, 20], [lon + 3, 20], [lon + 3, 23], [lon, 23], [lon, 20]]]);
+      data = {
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', properties: {}, geometry: { type: 'MultiPolygon', coordinates: sqs } }],
+      };
+    } else if (mode === 'manual') {
+      // 手写同区域小多边形对照：应在 132-134E/32.8-34.4N 渲染
+      const tri = [[[132, 32.8], [134.7, 32.8], [133.3, 34.4], [132, 32.8]]];
+      data = {
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', properties: {}, geometry: { type: 'MultiPolygon', coordinates: [tri] } }],
+      };
+    } else if (mode === 'no-degen') {
+      // 排除全球缠绕退化环 #60/#1345 之外的所有环
+      data = {
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', properties: {}, geometry: { type: 'MultiPolygon', coordinates: allRings.filter((_, i) => i !== 60 && i !== 1345) } }],
+      };
+    } else if (mode === 'degen-only') {
+      data = {
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', properties: {}, geometry: { type: 'MultiPolygon', coordinates: [allRings[60], allRings[1345]] } }],
+      };
+    } else {
+      data = land;
+    }
+    const zm = parseFloat(params.get('z') || '3');
+    const showLine = params.get('line') === '1';
+    const layers = [
+      { id: 'sea', type: 'background', paint: { 'background-color': '#0a1a2c' } },
+    ];
+    if (!showLine) {
+      layers.push({ id: 'land', type: 'fill', source: 'land', paint: { 'fill-color': '#283449' } });
+    }
+    layers.push({ id: 'coast', type: 'line', source: 'land', paint: { 'line-color': '#ff3333', 'line-width': 2 } });
+    const style = {
+      version: 8,
+      sources: { land: { type: 'geojson', data } },
+      layers,
+    };
+    window.__map = new Map({ container: 'm', style, center: [110, 30], zoom: zm });
+    window.__map.on('load', () => {
+      // 暴露 ring#110 在浏览器侧解析的 bbox
+      window.__ring110 = (() => {
+        const r = allRings[110][0];
+        return [Math.min(...r.map(p => p[0])), Math.min(...r.map(p => p[1])), Math.max(...r.map(p => p[0])), Math.max(...r.map(p => p[1]))];
+      })();
+      setTimeout(() => { window.__ready = true; }, 2500);
+    });
+  </script>
+</body>
+</html>

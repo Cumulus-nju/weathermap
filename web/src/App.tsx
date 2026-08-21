@@ -6,6 +6,7 @@ import { FpsMeter } from './components/FpsMeter';
 import { TimeScrubber } from './components/TimeScrubber';
 import { ValueCard } from './components/ValueCard';
 import { Legend } from './components/Legend';
+import { DataBadge } from './components/DataBadge';
 import { fetchManifest } from './lib/wmb';
 import { useTime, levelLabel } from './lib/timeStore';
 import { usePointer } from './lib/pointerStore';
@@ -50,6 +51,7 @@ export default function App() {
     <div className="app">
       <div ref={containerRef} className="map-container" />
       <FpsMeter />
+      <DataBadge />
       <TimeScrubber />
       <ControlPanel />
       <Watermark />

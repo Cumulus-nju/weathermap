@@ -40,6 +40,56 @@ body,
   z-index: 10;
 }
 
+/* ---- M4-3 数据新鲜度角标 ---- */
+.data-badge {
+  position: absolute;
+  top: 12px;
+  left: 88px; /* FPS 徽章右侧 */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  background: rgba(8, 14, 24, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  backdrop-filter: blur(6px);
+  user-select: none;
+  z-index: 10;
+}
+
+.data-badge-label {
+  padding: 1px 7px;
+  font-size: 11px;
+  border-radius: 4px;
+}
+
+.data-badge.ok {
+  color: #9fe08c;
+}
+.data-badge.ok .data-badge-label {
+  color: #0a1420;
+  background: #9fe08c;
+}
+
+.data-badge.warn {
+  color: #ffd479;
+}
+.data-badge.warn .data-badge-label {
+  color: #0a1420;
+  background: #ffd479;
+}
+
+.data-badge.stale {
+  color: #ff8a8a;
+  border-color: rgba(255, 138, 138, 0.35);
+}
+.data-badge.stale .data-badge-label {
+  color: #0a1420;
+  background: #ff8a8a;
+}
+
 /* ---- 控制面板 ---- */
 .panel {
   position: absolute;
