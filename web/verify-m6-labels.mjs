@@ -1,5 +1,6 @@
 // M6 城市标注 + 海岸线验收（真 GPU d3d11）：
-//   1) 默认视角(zoom3 东亚)出现城市标注，含 北京/上海/东京 等 tier0
+//   1) 默认视角(M7-2 正好覆盖中国 73.5-135°E, zoom≈3.6)出现 tier0 城市标注
+//      含 北京/上海/香港/台北/首尔/新德里；东京在帧缘可见属正常（不暴露数据边界）
 //   2) 标注位置 ≈ map.project 投影位置（错位 <8px）
 //   3) 亮色主题切回后标注仍在、颜色按主题
 //   4) flyTo 北京 zoom6 → 更多标注（tier1 城市出现）
@@ -27,14 +28,16 @@ await page.goto(url, { waitUntil: 'load' });
 await page.waitForSelector('.city-label', { timeout: 15000 }).catch(() => {});
 await page.waitForTimeout(1200);
 
-// ---- 1) 默认视角标注 ----
+// ---- 1) 默认视角标注（M7-2 初始正好覆盖中国）----
 console.log('-- 1. 默认视角标注 --');
 const labels = await page.evaluate(() =>
   [...document.querySelectorAll('.city-label')].map((el) => el.textContent),
 );
 console.log(`  标签(${labels.length}): ${labels.slice(0, 40).join(' ')}`);
-check('出现标注', labels.length >= 8, `count=${labels.length}`);
-for (const c of ['北京', '上海', '东京', '首尔']) {
+check('出现标注', labels.length >= 6, `count=${labels.length}`);
+// 中国框(73.5-135°E)内的 tier0 城市必现；东京(139.7E)/孟买(72.9E)在帧缘可见属正常
+// （数据域到 150°E/60°E，横向帧 66.7-141.9°E 不暴露数据边界）
+for (const c of ['北京', '上海', '香港', '台北', '首尔', '新德里']) {
   check(`含 ${c}`, labels.includes(c));
 }
 

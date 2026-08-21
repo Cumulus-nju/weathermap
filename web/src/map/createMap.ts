@@ -10,8 +10,8 @@ export function createMap(container: HTMLElement): Map {
   const map = new Map({
     container,
     style: darkBasemapStyle(),
-    center: [110, 30], // 东亚
-    zoom: 3,
+    center: [104, 36], // 中国（fitBounds 会立即微调到正好覆盖中国）
+    zoom: 3.5,
     minZoom: 1.5,
     maxZoom: 9,
     attributionControl: false,
@@ -19,6 +19,12 @@ export function createMap(container: HTMLElement): Map {
     pitchWithRotate: false,
     touchPitch: false,
   });
+
+  // M7-2 初始视角正好覆盖中国（73.5–135.1°E / 18.2–53.6°N）：
+  // 聚焦核心数据区，把数据域边缘(60°E/150°E/0°N/60°N)挤出视口，
+  // 看不出"只有中国附近有数据"。fitBounds 按实际窗口尺寸自适应。
+  // 只在此处调用一次——不能放 style.load（主题切换会重置用户相机）。
+  map.fitBounds([[73.5, 18.2], [135.1, 53.6]], { padding: 16, animate: false });
 
   // M5 主题切换用 setStyle 会重建样式、丢自定义层；这里幂等重挂，
   // 让 load 与 style.load 都触发（applyTheme 后粒子重播种一次，单帧代价）
