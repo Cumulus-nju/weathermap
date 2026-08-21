@@ -1,7 +1,12 @@
-import { useWindSettings, useOverlay, useUnits, type OverlayField } from '../store';
+import {
+  useWindSettings, useOverlay, useUnits, useTheme, SURFACE_ONLY,
+  type OverlayField, type Theme,
+} from '../store';
 import { WIND_UNITS, TEMP_UNITS } from '../lib/units';
 import { LEVELS } from '../lib/dataLoader';
 import { useTime, levelLabel } from '../lib/timeStore';
+import { applyTheme } from '../lib/basemap';
+import { getMap } from '../lib/mapStore';
 
 // M0 控制面板：粒子数 / 速度 / 尾迹 / 亮度，全部走 zustand（不触发 React 重渲染的风层）
 // 渲染循环在 WindLayer.render 里直接读 store.getState()，这里只管滑块 UI
@@ -32,28 +37,94 @@ function LevelChips() {
 }
 
 // M4 叠加图层选择（温度/湿度/降水）+ 不透明度
+// M5：新增 阵风/露点/总云/低云/中云/高云，全是 surface-only —— 选中时若不在地面层自动切过去
 const OVERLAY_OPTS: { id: OverlayField; label: string }[] = [
   { id: 'off', label: '关' },
   { id: 'temp', label: '温度' },
   { id: 'rh', label: '湿度' },
   { id: 'apcp', label: '降水' },
+  { id: 'gust', label: '阵风' },
+  { id: 'dpt', label: '露点' },
+  { id: 'tcdc', label: '总云' },
+  { id: 'lcdc', label: '低云' },
+  { id: 'mcdc', label: '中云' },
+  { id: 'hcdc', label: '高云' },
 ];
 
 function OverlayChips() {
   const field = useOverlay((s) => s.field);
   const setField = useOverlay((s) => s.setField);
+  const level = useTime((s) => s.level);
+  const setLevel = useTime((s) => s.setLevel);
+  const onSelect = (id: OverlayField) => {
+    if (id !== 'off' && SURFACE_ONLY.has(id) && level !== 'sfc') setLevel('sfc');
+    setField(id);
+  };
   return (
-    <div className="level-row" title="叠加图层（色斑）">
+    <div className="level-row level-row2" title="叠加图层（色斑）">
       {OVERLAY_OPTS.map((o) => (
         <button
           key={o.id}
           className={`level-chip${field === o.id ? ' on' : ''}`}
-          onClick={() => setField(o.id)}
+          onClick={() => onSelect(o.id)}
         >
           {o.label}
         </button>
       ))}
     </div>
+  );
+}
+
+// M5 等压线 toggle：独立开关，不占色斑芯片；打开时自动切到地面层
+function IsoToggle() {
+  const isoOn = useOverlay((s) => s.isoOn);
+  const setIsoOn = useOverlay((s) => s.setIsoOn);
+  const level = useTime((s) => s.level);
+  const setLevel = useTime((s) => s.setLevel);
+  return (
+    <label className="ctrl-row toggle">
+      <span>等压线</span>
+      <button
+        className={`toggle-btn${isoOn ? ' on' : ''}`}
+        onClick={() => {
+          if (!isoOn && level !== 'sfc') setLevel('sfc'); // prmsl 只在地面层
+          setIsoOn(!isoOn);
+        }}
+      >
+        {isoOn ? '开' : '关'}
+      </button>
+    </label>
+  );
+}
+
+// M5 底图主题（暗色/亮色）：切换 store + 应用到地图（setStyle 触发 style.load 重挂自定义层）
+const THEMES: { id: Theme; label: string }[] = [
+  { id: 'dark', label: '暗色' },
+  { id: 'light', label: '亮色' },
+];
+
+function ThemeRow() {
+  const theme = useTheme((s) => s.theme);
+  const setTheme = useTheme((s) => s.setTheme);
+  return (
+    <>
+      <div className="panel-title panel-title2">主题</div>
+      <div className="level-row level-row2" title="底图主题">
+        {THEMES.map((t) => (
+          <button
+            key={t.id}
+            className={`level-chip${theme === t.id ? ' on' : ''}`}
+            onClick={() => {
+              setTheme(t.id);
+              const map = getMap();
+              if (map) applyTheme(map, t.id);
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -178,8 +249,10 @@ export function ControlPanel() {
       <LevelChips />
       <div className="panel-title panel-title2">叠加图层</div>
       <OverlayChips />
+      <IsoToggle />
       <OverlayOpacity />
       <UnitRow />
+      <ThemeRow />
       <div className="panel-title panel-title2">风场粒子</div>
       <label className="ctrl-row toggle">
         <span>动画</span>

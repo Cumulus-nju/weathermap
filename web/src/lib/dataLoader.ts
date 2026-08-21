@@ -51,7 +51,9 @@ export function ensureGrid(level: Level, fxx: number): void {
 
 /** 该层所需的字段名（解码时只解这些，省 CPU） */
 function fieldsFor(level: Level): string[] {
-  if (level === 'sfc') return ['u_sfc', 'v_sfc', 't2m', 'rh2m', 'prmsl', 'apcp'];
+  if (level === 'sfc')
+    return ['u_sfc', 'v_sfc', 't2m', 'rh2m', 'prmsl', 'apcp',
+      'gust_sfc', 'dpt2m', 'tcdc', 'lcdc', 'mcdc', 'hcdc'];
   return [`u_${level}`, `v_${level}`, `t_${level}`, `rh_${level}`];
 }
 

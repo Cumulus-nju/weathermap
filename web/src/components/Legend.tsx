@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useOverlay, useUnits } from '../store';
+import { useOverlay, useUnits, useTheme } from '../store';
 import { useTime } from '../lib/timeStore';
 import { getGrid } from '../lib/dataLoader';
 import { CMAPS, cmapToCss, fieldValueRange, type Colormap } from '../lib/colormaps';
@@ -8,15 +8,18 @@ import { tempFromK, tempUnitLabel } from '../lib/units';
 // M4 图例：当前叠加层的色带 + 量程。与 ColorLayer 同源（CMAPS），所见即所渲。
 // 温度/湿度量程固定（数据未加载也可显示）；降水自适应当前网格最大值（未就绪时显示占位量程）。
 // M4-2：温度量程/单位标签随 useUnits 切换 ℃↔℉。
+// M5：等压线开关也在这显示（4 hPa 色样）；露点走温度换算、云量走 %。
 
 interface LegendState {
-  cmap: Colormap;
+  cmap: Colormap | null;
+  iso: boolean;
   min: string;
   max: string;
 }
 
 function fmtVal(field: Colormap['id'], v: number): string {
-  if (field === 'temp') return `${Math.round(tempFromK(v, useUnits.getState().temp))}°`;
+  if (field === 'temp' || field === 'dpt')
+    return `${Math.round(tempFromK(v, useUnits.getState().temp))}°`;
   return `${Math.round(v)}`;
 }
 
@@ -33,16 +36,18 @@ export function Legend() {
       last = now;
 
       const o = useOverlay.getState();
-      if (o.field === 'off') {
-        setState(null);
-        return;
-      }
+      const iso = o.isoOn;
       const t = useTime.getState();
       const m = t.manifest;
       if (!m || m.timesteps.length === 0) return;
-      // 降水只在地面层有
-      if (o.field === 'apcp' && t.level !== 'sfc') {
+      // 等压线/降水都只在地面层有
+      if (t.level !== 'sfc' && (iso || o.field === 'apcp')) {
         setState(null);
+        return;
+      }
+      if (o.field === 'off') {
+        // 仅等压线开 → 显示等压线图例
+        setState(iso ? { cmap: null, iso: true, min: '', max: '' } : null);
         return;
       }
       const cmap = CMAPS[o.field];
@@ -59,29 +64,47 @@ export function Legend() {
       } else {
         range = fieldValueRange(o.field, []);
       }
-      setState({ cmap, min: fmtVal(o.field, range[0]), max: fmtVal(o.field, range[1]) });
+      setState({ cmap, iso, min: fmtVal(o.field, range[0]), max: fmtVal(o.field, range[1]) });
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, []);
 
   if (!state) return null;
+  const theme = useTheme.getState().theme;
+  // 等压线色样跟随主题（与 ColorLayer 的 u_isoColor 同源）
+  const isoColor = theme === 'light' ? 'rgba(64, 74, 100, 0.95)' : 'rgba(242, 235, 218, 0.95)';
   return (
     <div className="legend">
       <div className="legend-title">
-        {state.cmap.name}{' '}
-        <span className="legend-unit">
-          ({state.cmap.id === 'temp' ? tempUnitLabel(tempUnit) : state.cmap.unit})
-        </span>
+        {state.cmap ? state.cmap.name : '等压线'}
+        {state.cmap && (
+          <span className="legend-unit">
+            ({state.cmap.id === 'temp' || state.cmap.id === 'dpt' ? tempUnitLabel(tempUnit) : state.cmap.unit})
+          </span>
+        )}
+        {state.iso && (
+          <span className="legend-iso">{state.cmap ? ' · 等压线' : '（4 hPa）'}</span>
+        )}
       </div>
       <div className="legend-row">
         <div
           className="legend-bar"
-          style={{ background: `linear-gradient(to top, ${cmapToCss(state.cmap)})` }}
+          style={
+            state.cmap
+              ? { background: `linear-gradient(to top, ${cmapToCss(state.cmap)})` }
+              : { background: isoColor, borderColor: 'rgba(255,255,255,0.2)' }
+          }
         />
         <div className="legend-scale">
-          <span>{state.max}</span>
-          <span>{state.min}</span>
+          {state.cmap ? (
+            <>
+              <span>{state.max}</span>
+              <span>{state.min}</span>
+            </>
+          ) : (
+            <span>等值线</span>
+          )}
         </div>
       </div>
     </div>

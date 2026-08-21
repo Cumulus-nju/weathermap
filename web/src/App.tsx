@@ -7,9 +7,12 @@ import { TimeScrubber } from './components/TimeScrubber';
 import { ValueCard } from './components/ValueCard';
 import { Legend } from './components/Legend';
 import { DataBadge } from './components/DataBadge';
+import { CitySearch } from './components/CitySearch';
 import { fetchManifest } from './lib/wmb';
 import { useTime, levelLabel } from './lib/timeStore';
 import { usePointer } from './lib/pointerStore';
+import { useTheme } from './store';
+import { setMap } from './lib/mapStore';
 
 function Watermark() {
   const manifest = useTime((s) => s.manifest);
@@ -29,6 +32,8 @@ export default function App() {
     if (!containerRef.current) return;
     const map = createMap(containerRef.current);
     mapRef.current = map;
+    setMap(map); // M5 CitySearch 通过模块级引用 flyTo
+    (window as any).__map = map; // e2e 验收用
 
     // M3 读数卡：指针移动写入 pointerStore（ValueCard 用自己的 rAF 循环节流读取）
     map.on('mousemove', (e: MapMouseEvent) => {
@@ -43,8 +48,18 @@ export default function App() {
 
     return () => {
       map.remove();
+      setMap(null);
       mapRef.current = null;
     };
+  }, []);
+
+  // M5 亮色主题：body dataset 给全局样式切换（水面/陆地等 UI 文字对比度）
+  useEffect(() => {
+    const sub = useTheme.subscribe((s) => {
+      document.body.dataset.theme = s.theme;
+    });
+    document.body.dataset.theme = useTheme.getState().theme;
+    return () => sub();
   }, []);
 
   return (
@@ -52,6 +67,7 @@ export default function App() {
       <div ref={containerRef} className="map-container" />
       <FpsMeter />
       <DataBadge />
+      <CitySearch />
       <TimeScrubber />
       <ControlPanel />
       <Watermark />

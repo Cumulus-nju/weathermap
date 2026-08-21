@@ -1,8 +1,8 @@
 import type { CustomLayerInterface, Map as MapLibreMap } from 'maplibre-gl';
-import { useOverlay, type OverlayField } from '../store';
+import { useOverlay, useTheme, SURFACE_ONLY, type OverlayField } from '../store';
 import { useTime } from '../lib/timeStore';
 import { ensureGrid, getGrid, getGridByKey } from '../lib/dataLoader';
-import { mercX, mercY } from '../lib/grid';
+import { mercX, mercY, type WindGrid } from '../lib/grid';
 import { CMAPS, cmapToPixels, fieldValueRange } from '../lib/colormaps';
 import { OVERLAY_VERT, OVERLAY_FRAG } from './shaders';
 
@@ -11,12 +11,18 @@ import { OVERLAY_VERT, OVERLAY_FRAG } from './shaders';
 // 字段按 (层,时次) 惰性上传 R32F 纹理，双时次按播放头 frac 交叉淡化（拖动平滑）。
 // 只渲染网格 UV 域内的四边形，域外透明度为 0。
 
-/** 叠加字段 -> WindGrid 上的字段数组（收窄为 float 数组键，保证索引类型） */
-type FieldKey = 't' | 'rh' | 'apcp';
+/** 叠加字段 -> WindGrid 上的字段数组（收窄为 float 数组键，保证索引类型；prmsl 为等压线专用） */
+type FieldKey = 't' | 'rh' | 'apcp' | 'gust' | 'dpt' | 'tcdc' | 'lcdc' | 'mcdc' | 'hcdc' | 'prmsl';
 const FIELD_KEY: Record<Exclude<OverlayField, 'off'>, FieldKey> = {
   temp: 't',
   rh: 'rh',
   apcp: 'apcp',
+  gust: 'gust',
+  dpt: 'dpt',
+  tcdc: 'tcdc',
+  lcdc: 'lcdc',
+  mcdc: 'mcdc',
+  hcdc: 'hcdc',
 };
 
 const QUAD_UV = new Float32Array([
@@ -71,15 +77,19 @@ export class ColorLayer implements CustomLayerInterface {
   }
 
   // ---- 渲染 ----
+  // M5 等压线：mode 0=仅色斑 1=仅等压线 2=色斑+等压线（isoOn 决定）；prmsl 仅 surface
   render(_gl: WebGLRenderingContext) {
     const gl = this.gl;
     const o = useOverlay.getState();
-    if (o.field === 'off') return;
+    const mode: number = o.isoOn ? (o.field !== 'off' ? 2 : 1) : 0;
+    if (mode === 0) return;
+    // 收窄：mode!==1 时必有色斑字段（TS 无法从 mode 推断，这里显式 null 化）
+    const colorField: Exclude<OverlayField, 'off'> | null = o.field === 'off' ? null : o.field;
     const t = useTime.getState();
     const m = t.manifest;
     if (!m || m.timesteps.length === 0) return;
-    // 降水只在地面层有
-    if (o.field === 'apcp' && t.level !== 'sfc') return;
+    // surface-only 色斑字段与等压线都要求地面层（UI 已自动切换，这里防御）
+    if (t.level !== 'sfc' && (o.isoOn || (o.field !== 'off' && SURFACE_ONLY.has(o.field)))) return;
 
     const { domain } = m;
     const ts = m.timesteps;
@@ -88,22 +98,47 @@ export class ColorLayer implements CustomLayerInterface {
     const f0 = ts[i];
     const f1 = ts[(i + 1) % n];
 
-    ensureGrid(t.level, f0.fxx);
-    ensureGrid(t.level, f1.fxx);
-    const g0 = getGrid(t.level, f0.fxx);
-    const g1 = getGrid(t.level, f1.fxx);
-    const bGrid = g0 ?? g1;
-    if (!bGrid) return; // 数据未就绪，等下一帧
-    const k = FIELD_KEY[o.field];
-    if (!g0?.[k] && !g1?.[k]) return; // 该层无此字段（防御）
+    // 色斑分支（mode 1 跳过）
+    let colorTex0: WebGLTexture | undefined;
+    let colorTex1: WebGLTexture | undefined;
+    let cGrid: WindGrid | undefined;
+    let g0: WindGrid | undefined;
+    let g1: WindGrid | undefined;
+    let range: [number, number] = [0, 1];
+    if (mode !== 1) {
+      ensureGrid(t.level, f0.fxx);
+      ensureGrid(t.level, f1.fxx);
+      g0 = getGrid(t.level, f0.fxx);
+      g1 = getGrid(t.level, f1.fxx);
+      cGrid = g0 ?? g1;
+      if (!cGrid) return; // 数据未就绪，等下一帧
+      const k = FIELD_KEY[colorField!];
+      if (!g0?.[k] && !g1?.[k]) return; // 该层无此字段（防御）
+      colorTex0 = this.ensureFieldTex(k, t.level, f0.fxx);
+      colorTex1 = this.ensureFieldTex(k, t.level, f1.fxx);
+      if (!colorTex0 && !colorTex1) return; // 网格未就绪，等下一帧重试
+      range = fieldValueRange(colorField!, [g0, g1]);
+    }
 
-    const tex0 = this.ensureFieldTex(o.field, t.level, f0.fxx);
-    const tex1 = this.ensureFieldTex(o.field, t.level, f1.fxx);
-    if (!tex0 && !tex1) return; // 网格未就绪，等下一帧重试
-    const field0 = (tex0 ?? tex1)!;
-    const field1 = (tex1 ?? tex0)!;
-    const range = fieldValueRange(o.field, [g0, g1]);
-    const cmapTex = this.ensureCmap(o.field);
+    // 等压线分支（mode 0 跳过）：prmsl 固定取地面层
+    let isoTex0: WebGLTexture | undefined;
+    let isoTex1: WebGLTexture | undefined;
+    let isoGrid: WindGrid | undefined;
+    let i0: WindGrid | undefined;
+    let i1: WindGrid | undefined;
+    if (mode !== 0) {
+      ensureGrid('sfc', f0.fxx);
+      ensureGrid('sfc', f1.fxx);
+      i0 = getGrid('sfc', f0.fxx);
+      i1 = getGrid('sfc', f1.fxx);
+      isoGrid = i0 ?? i1;
+      if (!isoGrid) return;
+      if (!i0?.prmsl && !i1?.prmsl) return;
+      isoTex0 = this.ensureFieldTex('prmsl', 'sfc', f0.fxx);
+      isoTex1 = this.ensureFieldTex('prmsl', 'sfc', f1.fxx);
+      if (!isoTex0 && !isoTex1) return;
+    }
+    const bGrid = cGrid ?? isoGrid!;
 
     const prevFbo = gl.getParameter(gl.FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
     const dw = gl.drawingBufferWidth;
@@ -128,17 +163,31 @@ export class ColorLayer implements CustomLayerInterface {
     gl.uniform1i(this.u('u_field0'), 0);
     gl.uniform1i(this.u('u_field1'), 1);
     gl.uniform1i(this.u('u_cmap'), 2);
+    gl.uniform1i(this.u('u_iso0'), 3);
+    gl.uniform1i(this.u('u_iso1'), 4);
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, field0);
+    gl.bindTexture(gl.TEXTURE_2D, colorTex0 ?? null);
     gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, field1);
+    gl.bindTexture(gl.TEXTURE_2D, colorTex1 ?? null);
     gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D, cmapTex);
+    gl.bindTexture(gl.TEXTURE_2D, o.field !== 'off' ? this.ensureCmap(o.field) : null);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, isoTex0 ?? null);
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, isoTex1 ?? null);
 
-    gl.uniform1f(this.u('u_mix'), g0 && g1 && tex0 && tex1 ? t.frac : 0);
+    const colorMix = g0 && g1 && colorTex0 && colorTex1 ? t.frac : 0;
+    const isoMix = i0 && i1 && isoTex0 && isoTex1 ? t.frac : 0;
+    gl.uniform1f(this.u('u_mix'), mode === 1 ? isoMix : colorMix);
+    gl.uniform1i(this.u('u_mode'), mode);
     gl.uniform2f(this.u('u_fieldSize'), bGrid.cols, bGrid.rows);
     gl.uniform2f(this.u('u_valRange'), range[0], range[1]);
     gl.uniform1f(this.u('u_opacity'), o.opacity);
+    gl.uniform1f(this.u('u_isoInterval'), 400.0); // 4 hPa
+    // 线色由主题决定：暗色暖白 / 亮色石板灰
+    const theme = useTheme.getState().theme;
+    const isoColor = theme === 'light' ? [0.32, 0.38, 0.5] : [0.95, 0.92, 0.83];
+    gl.uniform3f(this.u('u_isoColor'), isoColor[0], isoColor[1], isoColor[2]);
     gl.uniform2f(this.u('u_domain'), lon0, lat0);
     gl.uniform2f(this.u('u_domainSpan'), lon1 - lon0, lat1 - lat0);
     gl.uniform2f(this.u('u_m0'), m0x, m0y);
@@ -157,7 +206,7 @@ export class ColorLayer implements CustomLayerInterface {
 
   // ---- 字段纹理（RGBA32F，值放 R 通道；NEAREST 过滤，着色器内手动双线性）----
   private ensureFieldTex(
-    field: Exclude<OverlayField, 'off'>,
+    field: FieldKey,
     level: number | 'sfc',
     fxx: number,
   ): WebGLTexture | undefined {
@@ -166,7 +215,7 @@ export class ColorLayer implements CustomLayerInterface {
     const hit = this.texByKey.get(key);
     if (hit) return hit.tex;
     const g = getGrid(level, fxx);
-    const data = g?.[FIELD_KEY[field]];
+    const data = g?.[field];
     if (!g || !data) return undefined; // 网格未就绪（异步加载中），下一帧重试
     const gl = this.gl;
     const rgba = new Float32Array(g.cols * g.rows * 4);

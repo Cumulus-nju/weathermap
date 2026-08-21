@@ -26,12 +26,19 @@ SURFACE_FIELDS = [
     ("RH", "2 m above ground", "rh2m"),
     ("PRMSL", "mean sea level", "prmsl"),
     ("APCP", "surface", "apcp"),
+    # M5 新图层：阵风 / 露点 / 总云 / 低中高云（GFS 0.25° 全可用）
+    ("GUST", "surface", "gust_sfc"),
+    ("DPT", "2 m above ground", "dpt2m"),
+    ("TCDC", "entire atmosphere", "tcdc"),
+    ("LCDC", "low cloud layer", "lcdc"),
+    ("MCDC", "middle cloud layer", "mcdc"),
+    ("HCDC", "high cloud layer", "hcdc"),
 ]
 
 # 编码精度：小数位数 prec → scale = 10**-prec；offset 让 int16 覆盖真实范围
 # 键 = 字段名类别（u*/v* 归 u/v 类）
-FIELD_PREC = {"u": 2, "v": 2, "t": 2, "rh": 2, "prmsl": 0, "apcp": 2}
-FIELD_OFFSET = {"u": 0.0, "v": 0.0, "t": 200.0, "rh": 0.0, "prmsl": 95000.0, "apcp": 0.0}
+FIELD_PREC = {"u": 2, "v": 2, "t": 2, "rh": 2, "prmsl": 0, "apcp": 2, "gust_sfc": 1, "tcdc": 0, "lcdc": 0, "mcdc": 0, "hcdc": 0}
+FIELD_OFFSET = {"u": 0.0, "v": 0.0, "t": 200.0, "rh": 0.0, "prmsl": 95000.0, "apcp": 0.0, "gust_sfc": 0.0, "tcdc": 0.0, "lcdc": 0.0, "mcdc": 0.0, "hcdc": 0.0}
 
 
 def field_kind(name: str) -> str:
@@ -42,13 +49,15 @@ def field_kind(name: str) -> str:
         return "v"
     if name.startswith("t2"):
         return "t"
+    if name == "dpt2m":  # 露点存 K，复用 t 类精度（prec 2 / offset 200）
+        return "t"
     if name.startswith("rh"):
         return "rh"
     if name.startswith("t_"):
         return "t"
     if name.startswith("rh_"):
         return "rh"
-    return name  # prmsl / apcp
+    return name  # prmsl / apcp / gust_sfc / 云量
 
 
 def all_field_ids() -> list[str]:

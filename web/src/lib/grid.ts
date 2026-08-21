@@ -25,6 +25,18 @@ export interface WindGrid {
   prmsl?: Float32Array;
   /** 3h 累积降水 mm（仅地面；f000 为 PRATE 速率兜底） */
   apcp?: Float32Array;
+  /** M5 10m 阵风 m/s（仅地面） */
+  gust?: Float32Array;
+  /** M5 2m 露点 K（仅地面） */
+  dpt?: Float32Array;
+  /** M5 总云量 %（仅地面，entireAtmosphere） */
+  tcdc?: Float32Array;
+  /** M5 低云量 %（仅地面） */
+  lcdc?: Float32Array;
+  /** M5 中云量 %（仅地面） */
+  mcdc?: Float32Array;
+  /** M5 高云量 %（仅地面） */
+  hcdc?: Float32Array;
   /** 全场最大风速 m/s（配色自适应归一化用，加载时算好） */
   maxSpeed?: number;
   /** 全场最大降水 mm（仅地面，降水色带自适应量程用） */
@@ -64,6 +76,12 @@ export function buildGrid(
     g.rh = fields['rh2m'];
     g.prmsl = fields['prmsl'];
     g.apcp = fields['apcp'];
+    g.gust = fields['gust_sfc'];
+    g.dpt = fields['dpt2m'];
+    g.tcdc = fields['tcdc'];
+    g.lcdc = fields['lcdc'];
+    g.mcdc = fields['mcdc'];
+    g.hcdc = fields['hcdc'];
   } else {
     g.t = fields[`t_${level}`];
     g.rh = fields[`rh_${level}`];
@@ -88,7 +106,7 @@ export function sampleField(
   g: WindGrid,
   lon: number,
   lat: number,
-  f: 'u' | 'v' | 't' | 'rh' | 'prmsl' | 'apcp',
+  f: 'u' | 'v' | 't' | 'rh' | 'prmsl' | 'apcp' | 'gust' | 'dpt' | 'tcdc' | 'lcdc' | 'mcdc' | 'hcdc',
 ): number | null {
   const data = g[f];
   if (!data) return null;

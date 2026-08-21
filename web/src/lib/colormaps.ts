@@ -67,11 +67,73 @@ export const APCP_CMAP: Colormap = {
   ],
 };
 
+// M5 阵风（m/s 0-30）：弱→强 蓝→青→青柠→橙→红
+export const GUST_CMAP: Colormap = {
+  id: 'gust',
+  name: '阵风',
+  unit: 'm/s',
+  stops: [
+    { t: 0.0, c: [30, 80, 150] },
+    { t: 0.25, c: [30, 150, 190] },
+    { t: 0.5, c: [120, 210, 120] },
+    { t: 0.72, c: [250, 200, 40] },
+    { t: 0.88, c: [248, 120, 40] },
+    { t: 1.0, c: [210, 30, 60] },
+  ],
+};
+
+// M5 露点（K -40..40℃）：闷热区醒目 钢→青→橄榄→琥珀→玫瑰
+export const DPT_CMAP: Colormap = {
+  id: 'dpt',
+  name: '露点',
+  unit: '℃',
+  stops: [
+    { t: 0.0, c: [60, 80, 120] },
+    { t: 0.25, c: [50, 140, 160] },
+    { t: 0.5, c: [150, 190, 90] },
+    { t: 0.75, c: [230, 180, 60] },
+    { t: 1.0, c: [210, 90, 110] },
+  ],
+};
+
+// M5 云量（%）：云越多越亮 钢→浅灰→白（云图氛围感）
+const CLOUD_STOPS: ColorStop[] = [
+  { t: 0.0, c: [70, 80, 100] },
+  { t: 0.35, c: [110, 120, 140] },
+  { t: 0.7, c: [170, 178, 192] },
+  { t: 1.0, c: [240, 244, 250] },
+];
+export const TCDC_CMAP: Colormap = { id: 'tcdc', name: '总云量', unit: '%', stops: CLOUD_STOPS };
+export const LCDC_CMAP: Colormap = { id: 'lcdc', name: '低云', unit: '%', stops: [
+  { t: 0.0, c: [40, 90, 120] },
+  { t: 0.4, c: [70, 140, 160] },
+  { t: 0.75, c: [130, 190, 200] },
+  { t: 1.0, c: [235, 242, 248] },
+]};
+export const MCDC_CMAP: Colormap = { id: 'mcdc', name: '中云', unit: '%', stops: [
+  { t: 0.0, c: [60, 70, 130] },
+  { t: 0.4, c: [100, 115, 180] },
+  { t: 0.75, c: [160, 170, 215] },
+  { t: 1.0, c: [238, 240, 250] },
+]};
+export const HCDC_CMAP: Colormap = { id: 'hcdc', name: '高云', unit: '%', stops: [
+  { t: 0.0, c: [80, 60, 120] },
+  { t: 0.4, c: [125, 110, 175] },
+  { t: 0.75, c: [180, 170, 215] },
+  { t: 1.0, c: [245, 244, 252] },
+]};
+
 /** 层名 -> 色带 */
 export const CMAPS: Record<Exclude<OverlayField, 'off'>, Colormap> = {
   temp: TEMP_CMAP,
   rh: RH_CMAP,
   apcp: APCP_CMAP,
+  gust: GUST_CMAP,
+  dpt: DPT_CMAP,
+  tcdc: TCDC_CMAP,
+  lcdc: LCDC_CMAP,
+  mcdc: MCDC_CMAP,
+  hcdc: HCDC_CMAP,
 };
 
 // ---- 色带工具 ----
@@ -121,6 +183,9 @@ export function cmapToCss(cmap: Colormap): string {
 // 温度纹理存 K；固定量程保证不同时次/层可比。降水自适应当前场最大（f000 是 PRATE 速率≈0，天然接近 0）。
 export const TEMP_RANGE: [number, number] = [233.15, 313.15]; // -40..40℃
 export const RH_RANGE: [number, number] = [0, 100];
+export const GUST_RANGE: [number, number] = [0, 30]; // m/s
+export const DPT_RANGE: [number, number] = TEMP_RANGE; // 露点复用温度量程
+export const CLOUD_RANGE: [number, number] = [0, 100]; // %
 
 /** 该字段的渲染量程（降水按传入网格的最大值自适应） */
 export function fieldValueRange(
@@ -129,6 +194,10 @@ export function fieldValueRange(
 ): [number, number] {
   if (field === 'temp') return TEMP_RANGE;
   if (field === 'rh') return RH_RANGE;
+  if (field === 'gust') return GUST_RANGE;
+  if (field === 'dpt') return DPT_RANGE;
+  if (field === 'tcdc' || field === 'lcdc' || field === 'mcdc' || field === 'hcdc')
+    return CLOUD_RANGE;
   let m = 0;
   for (const g of grids) if (g?.maxApcp) m = Math.max(m, g.maxApcp);
   return [0, Math.max(5, m)];

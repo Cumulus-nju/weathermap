@@ -173,11 +173,16 @@ def fetch_timestep(t: datetime, fxx: int, session: requests.Session,
             #   静默返回空；heightAboveGround 组内混 10m+2m 时 cfgrib 会跳过 2m 字段（无害）。
             # - rename 仅对存在的键生效（xarray rename 遇缺失键抛 ValueError）。
             for fkeys, renames in (
-                ({"typeOfLevel": "heightAboveGround"}, {}),     # u10, v10
+                ({"typeOfLevel": "heightAboveGround"}, {}),     # u10, v10（10m 组；GUST 在 surface 组）
                 ({"paramId": 167}, {}),                         # TMP:2m → t2m
                 ({"paramId": 260242}, {"r2": "rh2m"}),          # RH:2m → r2 → rh2m
                 ({"typeOfLevel": "meanSea"}, {}),               # prmsl（+mslet 忽略）
-                ({"typeOfLevel": "surface"}, {}),               # f000: prate (PRATE)；f003+: tp (APCP)
+                ({"typeOfLevel": "surface"}, {}),               # APCP/PRATE + GUST（gust）
+                ({"paramId": 168}, {}),                         # M5 DPT:2m → d2m（2m 在 heightAboveGround 组会被 cfgrib 跳过，须独立组）
+                ({"typeOfLevel": "atmosphere"}, {}),            # M5 TCDC 总云量 → tcc（NCEP paramId 228164）
+                ({"typeOfLevel": "lowCloudLayer"}, {}),         # M5 LCDC 低云 → lcc（paramId 3073）
+                ({"typeOfLevel": "middleCloudLayer"}, {}),      # M5 MCDC 中云 → mcc（paramId 3074）
+                ({"typeOfLevel": "highCloudLayer"}, {}),        # M5 HCDC 高云 → hcc（paramId 3075）
             ):
                 try:
                     ds_s = xr.open_dataset(
@@ -190,9 +195,14 @@ def fetch_timestep(t: datetime, fxx: int, session: requests.Session,
                             ds_s = ds_s.rename(present)
                     if len(ds_s.data_vars):
                         # 地面各组为单层：丢弃 typeOfLevel 标量坐标，避免 10m vs 2m 合并冲突
-                        for c in ("heightAboveGround", "meanSea", "surface"):
+                        for c in ("heightAboveGround", "meanSea", "surface",
+                                  "atmosphere", "lowCloudLayer",
+                                  "middleCloudLayer", "highCloudLayer"):
                             if c in ds_s.coords:
                                 ds_s = ds_s.drop_vars(c)
+                        # M5 调试：新组短名与 SURFACE_MAP 是否匹配，立刻可见
+                        if 168 in fkeys.values() or "CloudLayer" in str(fkeys) or "atmosphere" in str(fkeys):
+                            print(f"  [m5] filter {fkeys} -> data_vars={list(ds_s.data_vars)}")
                         parts.append(ds_s)
                 except Exception:
                     continue  # 该组无消息（如 f000 无 APCP）
@@ -258,11 +268,14 @@ def ds_to_arrays(ds: xr.Dataset, levels: list[int] | None = None) -> dict[str, n
             else:
                 arr = da.values.astype(np.float32)
             out[f"{code}_{int(lv)}"] = np.ascontiguousarray(arr)
-    # 地面（cfgrib 命名：u10/v10/t2m/rh2m/prmsl；降水 prate(f000)/tp(f003+) → apcp）
-    for fid, vn in (
+    # 地面（cfgrib 命名 → 输出名；降水 prate(f000)/tp(f003+) → apcp 单独处理）
+    SURFACE_MAP = [
         ("u_sfc", "u10"), ("v_sfc", "v10"), ("t2m", "t2m"), ("rh2m", "rh2m"),
         ("prmsl", "prmsl"),
-    ):
+        ("gust_sfc", "gust"), ("dpt2m", "d2m"),
+        ("tcdc", "tcc"), ("lcdc", "lcc"), ("mcdc", "mcc"), ("hcdc", "hcc"),
+    ]
+    for fid, vn in SURFACE_MAP:
         if vn in ds:
             out[fid] = np.ascontiguousarray(ds[vn].values.astype(np.float32))
     for vn in ("prate", "tp"):
@@ -270,10 +283,7 @@ def ds_to_arrays(ds: xr.Dataset, levels: list[int] | None = None) -> dict[str, n
             out["apcp"] = np.ascontiguousarray(ds[vn].values.astype(np.float32))
             break
     expected = {f"{c}_{lv}" for lv in levels for c in ("u", "v", "t", "rh")}
-    for fid, vn in (
-        ("u_sfc", "u10"), ("v_sfc", "v10"), ("t2m", "t2m"), ("rh2m", "rh2m"),
-        ("prmsl", "prmsl"),
-    ):
+    for fid, vn in SURFACE_MAP:
         if vn in ds:
             expected.add(fid)
     if any(v in ds for v in ("prate", "tp")):

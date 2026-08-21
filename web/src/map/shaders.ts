@@ -237,13 +237,19 @@ export const OVERLAY_FRAG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
 out vec4 fragColor;
-uniform sampler2D u_field0; // 当前时次字段
-uniform sampler2D u_field1; // 下一时次字段
+uniform sampler2D u_field0; // 当前时次字段（色斑）
+uniform sampler2D u_field1; // 下一时次字段（色斑）
 uniform vec2 u_fieldSize;   // 字段纹理尺寸 (cols, rows)
 uniform float u_mix;        // 0..1 时次插值
 uniform sampler2D u_cmap;   // 色带 1D 纹理（RGBA8, 64px）
 uniform vec2 u_valRange;    // (min, max)
 uniform float u_opacity;
+// M5 等压线：mode 0=仅色斑 1=仅等压线 2=色斑+等压线
+uniform int u_mode;
+uniform sampler2D u_iso0;   // 当前时次 prmsl（Pa）
+uniform sampler2D u_iso1;   // 下一时次 prmsl（Pa）
+uniform float u_isoInterval; // 等值线间隔（Pa，400 = 4 hPa）
+uniform vec3 u_isoColor;    // 线色（暗/亮主题不同）
 
 // 手动双线性采样（NEAREST 纹理；32F 纹理在部分软渲染器上不支持 LINEAR 过滤）
 float sampleField(sampler2D tex, vec2 uv) {
@@ -263,10 +269,24 @@ float sampleField(sampler2D tex, vec2 uv) {
 }
 
 void main() {
-  float v = mix(sampleField(u_field0, v_uv), sampleField(u_field1, v_uv), u_mix);
-  float t = clamp((v - u_valRange.x) / (u_valRange.y - u_valRange.x), 0.0, 1.0);
-  vec4 c = texture(u_cmap, vec2(t, 0.5));
-  // 预乘 alpha 输出（MapLibre 帧缓冲用 ONE, ONE_MINUS_SRC_ALPHA 合成）
-  fragColor = vec4(c.rgb * c.a * u_opacity, c.a * u_opacity);
+  vec4 acc = vec4(0.0);  // 预乘 alpha 累积，等压线叠加在色斑上
+  if (u_mode != 1) {
+    float v = mix(sampleField(u_field0, v_uv), sampleField(u_field1, v_uv), u_mix);
+    float t = clamp((v - u_valRange.x) / (u_valRange.y - u_valRange.x), 0.0, 1.0);
+    vec4 c = texture(u_cmap, vec2(t, 0.5));
+    acc = vec4(c.rgb * c.a * u_opacity, c.a * u_opacity);
+  }
+  if (u_mode != 0) {
+    // 等压线：以"值/间隔"的周期余数距离定线宽，fwidth 换算屏幕像素 → 抗锯齿 ~1px 线
+    float iso = mix(sampleField(u_iso0, v_uv), sampleField(u_iso1, v_uv), u_mix);
+    float t = iso / u_isoInterval;
+    float f = fract(t);
+    float d = min(f, 1.0 - f);              // 距最近等值线的距离（0..0.5）
+    float dpx = d / max(fwidth(t), 1e-4);   // 换算成屏幕像素
+    float line = 1.0 - smoothstep(0.4, 1.2, dpx);
+    float a = line * u_opacity;
+    acc += vec4(u_isoColor * a, a);
+  }
+  fragColor = acc;
 }
 `;

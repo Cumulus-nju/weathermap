@@ -20,10 +20,14 @@ export function createMap(container: HTMLElement): Map {
     touchPitch: false,
   });
 
-  map.on('load', () => {
-    map.addLayer(new ColorLayer()); // 色斑叠加在风粒子之下
-    map.addLayer(new WindLayer());
-  });
+  // M5 主题切换用 setStyle 会重建样式、丢自定义层；这里幂等重挂，
+  // 让 load 与 style.load 都触发（applyTheme 后粒子重播种一次，单帧代价）
+  const addCustomLayers = () => {
+    if (!map.getLayer('overlay')) map.addLayer(new ColorLayer()); // 色斑叠加在风粒子之下
+    if (!map.getLayer('wind')) map.addLayer(new WindLayer());
+  };
+  map.on('load', addCustomLayers);
+  map.on('style.load', addCustomLayers);
 
   return map;
 }

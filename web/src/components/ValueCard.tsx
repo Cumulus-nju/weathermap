@@ -9,7 +9,8 @@ import { windSpeed, windUnitLabel, tempFromC, tempUnitLabel } from '../lib/units
 // M3 读数卡：指针移动时双线性采样 (层, 当前时次/下一时次) 的网格，按播放头 frac 插值。
 // 用 rAF ~20Hz 节流读 zustand，不触发地图渲染循环；卡上数值随拖动实时更新。
 
-type Field = 'u' | 'v' | 't' | 'rh' | 'prmsl' | 'apcp';
+// M5：新增 阵风/露点/总云/低/中/高云（全部仅地面层）
+type Field = 'u' | 'v' | 't' | 'rh' | 'prmsl' | 'apcp' | 'gust' | 'dpt' | 'tcdc' | 'lcdc' | 'mcdc' | 'hcdc';
 
 interface Readout {
   x: number;
@@ -29,6 +30,15 @@ interface Readout {
   prmsl: number | null;
   /** 3h 累积降水 mm（仅地面） */
   apcp: number | null;
+  /** 阵风 m/s（仅地面） */
+  gust: number | null;
+  /** 露点 ℃（仅地面） */
+  dpt: number | null;
+  /** 云量 % 总/低/中/高（仅地面） */
+  tcdc: number | null;
+  lcdc: number | null;
+  mcdc: number | null;
+  hcdc: number | null;
   isSfc: boolean;
   level: string;
   validTime: string;
@@ -99,6 +109,12 @@ export function ValueCard() {
       const rh = s('rh');
       const prmsl = s('prmsl');
       const apcp = s('apcp');
+      const gust = s('gust');
+      const dpt = s('dpt');
+      const tcdc = s('tcdc');
+      const lcdc = s('lcdc');
+      const mcdc = s('mcdc');
+      const hcdc = s('hcdc');
       const g = g0 ?? g1;
       setRo({
         x: p.x, y: p.y,
@@ -109,6 +125,9 @@ export function ValueCard() {
         rh,
         prmsl: prmsl === null ? null : prmsl / 100,
         apcp,
+        gust,
+        dpt: dpt === null ? null : dpt - 273.15,
+        tcdc, lcdc, mcdc, hcdc,
         isSfc: t.level === 'sfc',
         level: levelLabel(t.level),
         validTime: g?.validTime ?? '',
@@ -166,6 +185,39 @@ export function ValueCard() {
         <div className="vc-row">
           <span className="vc-key">降水</span>
           <span className="vc-val">{ro.apcp === null ? '—' : `${ro.apcp.toFixed(1)} mm`}</span>
+        </div>
+      )}
+      {ro.isSfc && (
+        <div className="vc-row">
+          <span className="vc-key">阵风</span>
+          <span className="vc-val">
+            {ro.gust === null ? '—' : `${windSpeed(ro.gust, windUnit).toFixed(1)} ${windUnitLabel(windUnit)}`}
+          </span>
+        </div>
+      )}
+      {ro.isSfc && (
+        <div className="vc-row">
+          <span className="vc-key">露点</span>
+          <span className="vc-val">
+            {ro.dpt === null ? '—' : `${tempFromC(ro.dpt, tempUnit).toFixed(1)} ${tempUnitLabel(tempUnit)}`}
+          </span>
+        </div>
+      )}
+      {ro.isSfc && (
+        <div className="vc-row">
+          <span className="vc-key">云量</span>
+          <span className="vc-val">
+            {ro.tcdc === null
+              ? '—'
+              : [
+                  `总 ${ro.tcdc.toFixed(0)}%`,
+                  ro.lcdc === null ? null : `低 ${ro.lcdc.toFixed(0)}%`,
+                  ro.mcdc === null ? null : `中 ${ro.mcdc.toFixed(0)}%`,
+                  ro.hcdc === null ? null : `高 ${ro.hcdc.toFixed(0)}%`,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+          </span>
         </div>
       )}
       <div className="vc-foot">{fmtTime(ro.validTime)} 数据时次</div>
