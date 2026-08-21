@@ -28,13 +28,16 @@ function graticule(): GeoJSON.Feature<GeoJSON.MultiLineString> {
   return { type: 'Feature', properties: {}, geometry: { type: 'MultiLineString', coordinates: lines } };
 }
 
-/** 底图样式模板：海/陆底色 + 经纬网格 + 海岸线（暗亮主题仅换配色） */
+/** 底图样式模板：海/陆底色 + 经纬网格 + 双层次海岸线（暗亮主题仅换配色）
+ *  海岸线 = 宽 halo 衬边（陆侧压暗出轮廓）+ 细亮线，让大陆边界在海上/陆上/色斑下都清晰 */
 function baseStyle(
   sea: string,
   land: string,
   gratColor: string,
   gratOpacity: number,
   coastColor: string,
+  coastHalo: string,
+  coastHaloOpacity: number,
 ): StyleSpecification {
   return {
     version: 8,
@@ -47,28 +50,34 @@ function baseStyle(
       { id: 'sea', type: 'background', paint: { 'background-color': sea } },
       // 陆地填充（比海明显亮，让大陆轮廓 + 色斑颜色都更跳）
       { id: 'land', type: 'fill', source: 'land', paint: { 'fill-color': land } },
+      // 海岸 halo：粗线衬边，陆侧压出一道深/浅边界，让轮廓"立"起来
+      {
+        id: 'coast-halo', type: 'line', source: 'land',
+        paint: { 'line-color': coastHalo, 'line-opacity': coastHaloOpacity, 'line-width': 3.5 },
+      },
+      // 海岸线（亮色细线叠在 halo 上，保证在海上清晰可辨）
+      {
+        id: 'coast', type: 'line', source: 'land',
+        paint: { 'line-color': coastColor, 'line-opacity': 1, 'line-width': 1.4 },
+      },
       // 经纬网格（极淡，画在陆地上层）
       {
         id: 'grat', type: 'line', source: 'grat',
         paint: { 'line-color': gratColor, 'line-opacity': gratOpacity, 'line-width': 1 },
       },
-      // 海岸线（半透明描边，保证在海上清晰可辨）
-      {
-        id: 'coast', type: 'line', source: 'land',
-        paint: { 'line-color': coastColor, 'line-opacity': 0.7, 'line-width': 1 },
-      },
     ],
   };
 }
 
-// 暗色调：海偏蓝黑、陆地偏灰蓝且明显更亮（保证大陆轮廓一眼可辨），海岸线勾勒，网格若有若无
+// 暗色调：海偏蓝黑、陆地偏灰蓝且明显更亮（保证大陆轮廓一眼可辨），海岸 halo 用海色压暗陆侧，
+// 细亮线提亮边界；网格若有若无
 export function darkBasemapStyle(): StyleSpecification {
-  return baseStyle('#0a1a2c', '#283449', '#8aa0bd', 0.08, '#6b8cb8');
+  return baseStyle('#0a1a2c', '#2e3d58', '#8aa0bd', 0.08, '#9cc0ea', '#0a1a2c', 0.55);
 }
 
-// M5 亮色主题：纸张感航海图配色（海浅蓝 / 陆米白 / 网格石板灰 / 岸线中灰）
+// M5 亮色主题：纸张感航海图配色（海浅蓝 / 陆米白 / 网格石板灰 / 岸线中灰 + 中灰 halo 衬边）
 export function lightBasemapStyle(): StyleSpecification {
-  return baseStyle('#dbe7f2', '#f2efe6', '#5a6b80', 0.15, '#7f95ad');
+  return baseStyle('#dbe7f2', '#f2efe6', '#5a6b80', 0.15, '#7f95ad', '#c9d7e5', 0.8);
 }
 
 /** 切换主题：setStyle 会丢自定义层，style.load 时 createMap 幂等重挂 ColorLayer/WindLayer */

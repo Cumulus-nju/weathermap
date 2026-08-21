@@ -433,6 +433,33 @@ body,
   user-select: none;
 }
 
+/* ---- M6 城市标注（DOM 覆盖层，Windy 风格）---- */
+.city-labels {
+  position: absolute;
+  inset: 0;
+  z-index: 5; /* 地图/色斑之上，面板(badges z10)之下 */
+  pointer-events: none; /* 不挡地图拖拽 */
+  overflow: hidden;
+}
+
+.city-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: #dbe4f0;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.75), 0 0 5px rgba(0, 0, 0, 0.45);
+  white-space: nowrap;
+  user-select: none;
+  will-change: transform;
+}
+
+body[data-theme='light'] .city-label {
+  color: #33465c;
+  text-shadow: 0 0 4px rgba(255, 255, 255, 0.9), 0 1px 2px rgba(255, 255, 255, 0.7);
+}
+
 /* ---- M5 城市搜索 + 收藏 ---- */
 .city-search {
   position: absolute;

@@ -8,6 +8,7 @@ import { ValueCard } from './components/ValueCard';
 import { Legend } from './components/Legend';
 import { DataBadge } from './components/DataBadge';
 import { CitySearch } from './components/CitySearch';
+import { CityLabels } from './components/CityLabels';
 import { fetchManifest } from './lib/wmb';
 import { useTime, levelLabel } from './lib/timeStore';
 import { usePointer } from './lib/pointerStore';
@@ -68,6 +69,7 @@ export default function App() {
       <FpsMeter />
       <DataBadge />
       <CitySearch />
+      <CityLabels />
       <TimeScrubber />
       <ControlPanel />
       <Watermark />
