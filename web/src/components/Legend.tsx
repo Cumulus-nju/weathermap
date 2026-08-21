@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useOverlay, useUnits, useTheme } from '../store';
+import { useOverlay, useUnits, useTheme, SURFACE_ONLY, type OverlayField } from '../store';
 import { useTime } from '../lib/timeStore';
 import { getGrid } from '../lib/dataLoader';
-import { CMAPS, cmapToCss, fieldValueRange, type Colormap } from '../lib/colormaps';
+import { CMAPS, cmapToCss, fieldValueRange, ISO_LABEL, type Colormap } from '../lib/colormaps';
 import { tempFromK, tempUnitLabel } from '../lib/units';
 
 // M4 图例：当前叠加层的色带 + 量程。与 ColorLayer 同源（CMAPS），所见即所渲。
@@ -20,6 +20,7 @@ interface LegendState {
 function fmtVal(field: Colormap['id'], v: number): string {
   if (field === 'temp' || field === 'dpt')
     return `${Math.round(tempFromK(v, useUnits.getState().temp))}°`;
+  if (field === 'pressure') return `${Math.round(v / 100)}`; // Pa → hPa 显示
   return `${Math.round(v)}`;
 }
 
@@ -40,8 +41,10 @@ export function Legend() {
       const t = useTime.getState();
       const m = t.manifest;
       if (!m || m.timesteps.length === 0) return;
-      // 等压线/降水都只在地面层有
-      if (t.level !== 'sfc' && (iso || o.field === 'apcp')) {
+      // M7-4 等值线跟随图层：temp/rh 有高层数据 → 当前气压层也可显示；
+      // 其余（field=off 的默认等压线 + surface-only 字段）只在地面层有，与 ColorLayer 守卫同步
+      if (t.level !== 'sfc' &&
+          ((o.isoOn && o.field === 'off') || (o.field !== 'off' && SURFACE_ONLY.has(o.field)))) {
         setState(null);
         return;
       }
@@ -84,7 +87,7 @@ export function Legend() {
           </span>
         )}
         {state.iso && (
-          <span className="legend-iso">{state.cmap ? ' · 等压线' : '（4 hPa）'}</span>
+          <span className="legend-iso">{state.cmap ? ` · ${ISO_LABEL[state.cmap.id as Exclude<OverlayField, 'off'>]}` : ISO_LABEL.pressure}</span>
         )}
       </div>
       <div className="legend-row">

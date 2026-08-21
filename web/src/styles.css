@@ -474,6 +474,37 @@ body[data-theme='light'] .city-label {
   text-shadow: 0 0 4px rgba(255, 255, 255, 0.9), 0 1px 2px rgba(255, 255, 255, 0.7);
 }
 
+/* ---- M7-4 等值线数值标注（CPU marching squares → DOM）----
+   在城标(z5)之下：线标贴线，城名优先 */
+.iso-labels {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.iso-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  color: #f2ebda; /* 与暗色等值线同族 */
+  background: rgba(12, 18, 28, 0.62);
+  border-radius: 3px;
+  padding: 2px 4px;
+  white-space: nowrap;
+  user-select: none;
+  will-change: transform;
+}
+
+body[data-theme='light'] .iso-label {
+  color: #44546b;
+  background: rgba(255, 255, 255, 0.78);
+}
+
 /* ---- M5 城市搜索 + 收藏 ---- */
 .city-search {
   position: absolute;

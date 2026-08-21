@@ -57,10 +57,11 @@ export const useUnits = create<UnitsState>((set) => ({
 
 // M4 叠加图层：色斑叠加（温度/湿度/降水）+ 不透明度
 // M5：新增阵风/露点/云量；等压线是独立 toggle（isoOn），不占色斑 union
-export type OverlayField = 'off' | 'temp' | 'rh' | 'apcp' | 'gust' | 'dpt' | 'tcdc' | 'lcdc' | 'mcdc' | 'hcdc';
+// M7-4：新增气压色斑（prmsl）
+export type OverlayField = 'off' | 'temp' | 'rh' | 'apcp' | 'gust' | 'dpt' | 'tcdc' | 'lcdc' | 'mcdc' | 'hcdc' | 'pressure';
 
 /** 仅地面层有的色斑字段（选这些或开等压线时自动切到地面层） */
-export const SURFACE_ONLY = new Set<OverlayField>(['apcp', 'gust', 'dpt', 'tcdc', 'lcdc', 'mcdc', 'hcdc']);
+export const SURFACE_ONLY = new Set<OverlayField>(['apcp', 'gust', 'dpt', 'tcdc', 'lcdc', 'mcdc', 'hcdc', 'pressure']);
 
 interface OverlayState {
   field: OverlayField;

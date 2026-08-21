@@ -96,6 +96,20 @@ export const DPT_CMAP: Colormap = {
   ],
 };
 
+// M7-4 气压（Pa 存储，色带 950-1050hPa 归一）：低压深蓝灰 → 高压亮白（Windy 气压观感）
+export const PRESSURE_CMAP: Colormap = {
+  id: 'pressure',
+  name: '气压',
+  unit: 'hPa',
+  stops: [
+    { t: 0.0, c: [28, 42, 66] },
+    { t: 0.35, c: [62, 84, 112] },
+    { t: 0.6, c: [122, 142, 168] },
+    { t: 0.82, c: [198, 208, 220] },
+    { t: 1.0, c: [250, 252, 255] },
+  ],
+};
+
 // M5 云量（%）：云越多越亮 钢→浅灰→白（云图氛围感）
 const CLOUD_STOPS: ColorStop[] = [
   { t: 0.0, c: [70, 80, 100] },
@@ -134,6 +148,29 @@ export const CMAPS: Record<Exclude<OverlayField, 'off'>, Colormap> = {
   lcdc: LCDC_CMAP,
   mcdc: MCDC_CMAP,
   hcdc: HCDC_CMAP,
+  pressure: PRESSURE_CMAP,
+};
+
+// ---- M7-4 等值线（跟随图层）：间隔与图例标注 ----
+// 间隔用数据存储单位（温度/露点 K、气压 Pa、其余原单位）。
+export const ISO_INTERVAL: Record<Exclude<OverlayField, 'off'>, number> = {
+  temp: 5,      // 5℃
+  rh: 20,       // 20%
+  apcp: 10,     // 10mm
+  gust: 5,      // 5m/s
+  dpt: 5,       // 5℃
+  tcdc: 20, lcdc: 20, mcdc: 20, hcdc: 20, // 20%
+  pressure: 400, // 4 hPa（Pa）
+};
+/** 图例里"等值线"副标题（等压线沿用旧称呼） */
+export const ISO_LABEL: Record<Exclude<OverlayField, 'off'>, string> = {
+  temp: '等值线 5℃',
+  rh: '等值线 20%',
+  apcp: '等值线 10mm',
+  gust: '等值线 5m/s',
+  dpt: '等值线 5℃',
+  tcdc: '等值线 20%', lcdc: '等值线 20%', mcdc: '等值线 20%', hcdc: '等值线 20%',
+  pressure: '等压线 4 hPa',
 };
 
 // ---- 色带工具 ----
@@ -186,6 +223,7 @@ export const RH_RANGE: [number, number] = [0, 100];
 export const GUST_RANGE: [number, number] = [0, 30]; // m/s
 export const DPT_RANGE: [number, number] = TEMP_RANGE; // 露点复用温度量程
 export const CLOUD_RANGE: [number, number] = [0, 100]; // %
+export const PRESSURE_RANGE: [number, number] = [95000, 105000]; // Pa（950-1050 hPa）
 
 /** 该字段的渲染量程（降水按传入网格的最大值自适应） */
 export function fieldValueRange(
@@ -198,6 +236,7 @@ export function fieldValueRange(
   if (field === 'dpt') return DPT_RANGE;
   if (field === 'tcdc' || field === 'lcdc' || field === 'mcdc' || field === 'hcdc')
     return CLOUD_RANGE;
+  if (field === 'pressure') return PRESSURE_RANGE;
   let m = 0;
   for (const g of grids) if (g?.maxApcp) m = Math.max(m, g.maxApcp);
   return [0, Math.max(5, m)];

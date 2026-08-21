@@ -45,6 +45,7 @@ const OVERLAY_OPTS: { id: OverlayField; label: string }[] = [
   { id: 'apcp', label: '降水' },
   { id: 'gust', label: '阵风' },
   { id: 'dpt', label: '露点' },
+  { id: 'pressure', label: '气压' },
   { id: 'tcdc', label: '总云' },
   { id: 'lcdc', label: '低云' },
   { id: 'mcdc', label: '中云' },
@@ -75,19 +76,23 @@ function OverlayChips() {
   );
 }
 
-// M5 等压线 toggle：独立开关，不占色斑芯片；打开时自动切到地面层
+// M5 等值线 toggle：独立开关，不占色斑芯片。
+// M7-4 等值线跟随当前色斑字段（temp/rh 可在当前气压层画）；只有字段为 off（默认等压线）
+// 或 surface-only 字段时才强制切到地面层。
 function IsoToggle() {
   const isoOn = useOverlay((s) => s.isoOn);
   const setIsoOn = useOverlay((s) => s.setIsoOn);
+  const field = useOverlay((s) => s.field);
   const level = useTime((s) => s.level);
   const setLevel = useTime((s) => s.setLevel);
   return (
     <label className="ctrl-row toggle">
-      <span>等压线</span>
+      <span>等值线</span>
       <button
         className={`toggle-btn${isoOn ? ' on' : ''}`}
         onClick={() => {
-          if (!isoOn && level !== 'sfc') setLevel('sfc'); // prmsl 只在地面层
+          if (!isoOn && level !== 'sfc' && (field === 'off' || SURFACE_ONLY.has(field)))
+            setLevel('sfc');
           setIsoOn(!isoOn);
         }}
       >

@@ -3,7 +3,7 @@ import { useOverlay, useTheme, SURFACE_ONLY, type OverlayField } from '../store'
 import { useTime } from '../lib/timeStore';
 import { ensureGrid, getGrid, getGridByKey } from '../lib/dataLoader';
 import { mercX, mercY, type WindGrid } from '../lib/grid';
-import { CMAPS, cmapToPixels, fieldValueRange } from '../lib/colormaps';
+import { CMAPS, cmapToPixels, fieldValueRange, ISO_INTERVAL } from '../lib/colormaps';
 import { OVERLAY_VERT, OVERLAY_FRAG } from './shaders';
 
 // M4 色斑叠加层：温度/湿度/降水半透明色斑，画在风粒子下层。
@@ -12,8 +12,8 @@ import { OVERLAY_VERT, OVERLAY_FRAG } from './shaders';
 // 只渲染网格 UV 域内的四边形，域外透明度为 0。
 
 /** 叠加字段 -> WindGrid 上的字段数组（收窄为 float 数组键，保证索引类型；prmsl 为等压线专用） */
-type FieldKey = 't' | 'rh' | 'apcp' | 'gust' | 'dpt' | 'tcdc' | 'lcdc' | 'mcdc' | 'hcdc' | 'prmsl';
-const FIELD_KEY: Record<Exclude<OverlayField, 'off'>, FieldKey> = {
+export type FieldKey = 't' | 'rh' | 'apcp' | 'gust' | 'dpt' | 'tcdc' | 'lcdc' | 'mcdc' | 'hcdc' | 'prmsl';
+export const FIELD_KEY: Record<Exclude<OverlayField, 'off'>, FieldKey> = {
   temp: 't',
   rh: 'rh',
   apcp: 'apcp',
@@ -23,7 +23,11 @@ const FIELD_KEY: Record<Exclude<OverlayField, 'off'>, FieldKey> = {
   lcdc: 'lcdc',
   mcdc: 'mcdc',
   hcdc: 'hcdc',
+  pressure: 'prmsl',
 };
+// M7-4 等值线跟随图层：只有这些字段（及默认的 prmsl）没有等压面数据，须在地面层画等值线；
+// temp/rh 有高层数据 → 等值线可在当前气压层画（不再强制切 sfc）。
+const SURFACE_ONLY_FIELDS = new Set<FieldKey>(['prmsl', 'apcp', 'gust', 'dpt', 'tcdc', 'lcdc', 'mcdc', 'hcdc']);
 
 const QUAD_UV = new Float32Array([
   // 两个三角形覆盖整个网格域
@@ -77,21 +81,24 @@ export class ColorLayer implements CustomLayerInterface {
   }
 
   // ---- 渲染 ----
-  // M5 等压线：mode 0=仅色斑 1=仅等压线 2=色斑+等压线（isoOn 决定）；prmsl 仅 surface
+  // M7-4 等值线跟随图层：mode 0=仅色斑 1=仅等值线 2=色斑+等值线（isoOn 决定）
+  // iso 字段 = 当前色斑字段；temp/rh 有高层数据可在当前层画，surface-only 字段回退/强制地面
   render(_gl: WebGLRenderingContext) {
     const gl = this.gl;
     const o = useOverlay.getState();
-    // mode：0=仅色斑 1=仅等压线 2=色斑+等压线（isoOn 决定）
     // ⚠️ 勿在 mode===0 时 return——那正是「只开色斑不开等压线」的常态！
     const mode: number = o.isoOn ? (o.field !== 'off' ? 2 : 1) : 0;
     if (o.field === 'off' && !o.isoOn) return; // 两者全关才跳过
     // 收窄：mode!==1 时必有色斑字段（TS 无法从 mode 推断，这里显式 null 化）
     const colorField: Exclude<OverlayField, 'off'> | null = o.field === 'off' ? null : o.field;
+    const isoField: FieldKey = colorField ? FIELD_KEY[colorField] : 'prmsl';
     const t = useTime.getState();
     const m = t.manifest;
     if (!m || m.timesteps.length === 0) return;
-    // surface-only 色斑字段与等压线都要求地面层（UI 已自动切换，这里防御）
-    if (t.level !== 'sfc' && (o.isoOn || (o.field !== 'off' && SURFACE_ONLY.has(o.field)))) return;
+    // 防御：surface-only 色斑字段要求地面层；等值线跟随 surface-only 字段（或默认 prmsl）同。
+    // temp/rh 有高层数据 → 等值线可在当前气压层画，不强制切 sfc。
+    if (t.level !== 'sfc' &&
+        ((o.isoOn && SURFACE_ONLY_FIELDS.has(isoField)) || (o.field !== 'off' && SURFACE_ONLY.has(o.field)))) return;
 
     const { domain } = m;
     const ts = m.timesteps;
@@ -122,13 +129,14 @@ export class ColorLayer implements CustomLayerInterface {
       range = fieldValueRange(colorField!, [g0, g1]);
     }
 
-    // 等压线分支（mode 0 跳过）：prmsl 固定取地面层
-    let isoTex0: WebGLTexture | undefined;
-    let isoTex1: WebGLTexture | undefined;
-    let isoGrid: WindGrid | undefined;
-    let i0: WindGrid | undefined;
-    let i1: WindGrid | undefined;
-    if (mode !== 0) {
+    // 等值线分支（mode 0 跳过）：mode 2 复用色斑纹理（等值线=当前图层），
+    // mode 1（仅等值线、无色斑）回退 prmsl 等压线（默认）
+    let isoTex0 = colorTex0;
+    let isoTex1 = colorTex1;
+    let isoGrid = cGrid;
+    let i0 = g0;
+    let i1 = g1;
+    if (mode === 1) {
       ensureGrid('sfc', f0.fxx);
       ensureGrid('sfc', f1.fxx);
       i0 = getGrid('sfc', f0.fxx);
@@ -185,7 +193,7 @@ export class ColorLayer implements CustomLayerInterface {
     gl.uniform2f(this.u('u_fieldSize'), bGrid.cols, bGrid.rows);
     gl.uniform2f(this.u('u_valRange'), range[0], range[1]);
     gl.uniform1f(this.u('u_opacity'), o.opacity);
-    gl.uniform1f(this.u('u_isoInterval'), 400.0); // 4 hPa
+    gl.uniform1f(this.u('u_isoInterval'), ISO_INTERVAL[colorField ?? 'pressure']);
     // 线色由主题决定：暗色暖白 / 亮色石板灰
     const theme = useTheme.getState().theme;
     const isoColor = theme === 'light' ? [0.32, 0.38, 0.5] : [0.95, 0.92, 0.83];

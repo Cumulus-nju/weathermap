@@ -9,6 +9,7 @@ import { Legend } from './components/Legend';
 import { DataBadge } from './components/DataBadge';
 import { CitySearch } from './components/CitySearch';
 import { CityLabels } from './components/CityLabels';
+import { IsoLabels } from './components/IsoLabels';
 import { fetchManifest } from './lib/wmb';
 import { useTime, levelLabel } from './lib/timeStore';
 import { usePointer } from './lib/pointerStore';
@@ -69,6 +70,7 @@ export default function App() {
       <FpsMeter />
       <DataBadge />
       <CitySearch />
+      <IsoLabels />
       <CityLabels />
       <TimeScrubber />
       <ControlPanel />
