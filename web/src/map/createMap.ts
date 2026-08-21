@@ -2,6 +2,7 @@ import { Map } from 'maplibre-gl';
 import { WindLayer } from './WindLayer';
 import { ColorLayer } from './ColorLayer';
 import { darkBasemapStyle } from '../lib/basemap';
+import { useTheme } from '../store';
 
 // M4-3：离线暗色底图（陆地填充 + 海岸线 + 经纬网格，无外部瓦片依赖）
 // M4：叠加层（色斑）加在风粒子下层——先 addLayer 的在底层
@@ -31,6 +32,37 @@ export function createMap(container: HTMLElement): Map {
   const addCustomLayers = () => {
     if (!map.getLayer('overlay')) map.addLayer(new ColorLayer()); // 色斑叠加在风粒子之下
     if (!map.getLayer('wind')) map.addLayer(new WindLayer());
+    // M7-4 大陆边界：黑色细线 + 浅色衬边，盖在色斑+风粒子之上（Windy 同款——
+    // 底图里那层浅色海岸线被 0.65 透明度色斑压淡、等值线又是白色，边界就不明显了）。
+    // ⚠️ 不能加 beforeId：MapLibre 自定义层不进序列化层数组，beforeId 指到 custom 层时
+    // 会落到 overlay/wind 之下被色斑盖住——必须无 beforeId 追加到最顶层（实测才可见）。
+    // halo 用浅色衬在黑线后：黑线叠在深蓝灰气压斑上也能跳出来（纯黑在深底上会糊）。
+    const theme = useTheme.getState().theme;
+    const haloColor = theme === 'dark' ? '#cfdcf0' : '#ffffff';
+    if (!map.getLayer('coast-top-halo')) {
+      map.addLayer({
+        id: 'coast-top-halo',
+        type: 'line',
+        source: 'land',
+        paint: {
+          'line-color': haloColor,
+          'line-opacity': theme === 'dark' ? 0.5 : 0.65,
+          'line-width': 3.2,
+        },
+      });
+    }
+    if (!map.getLayer('coast-top')) {
+      map.addLayer({
+        id: 'coast-top',
+        type: 'line',
+        source: 'land',
+        paint: {
+          'line-color': '#0a0f18', // 近黑（两主题通用）
+          'line-opacity': 0.95,
+          'line-width': 1.4,
+        },
+      });
+    }
   };
   map.on('load', addCustomLayers);
   map.on('style.load', addCustomLayers);
