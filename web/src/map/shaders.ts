@@ -43,6 +43,11 @@ vec2 gridToClip(vec2 g) {
   vec2 s = gridToScreen(g);
   return vec2(s.x / u_cssSize.x * 2.0 - 1.0, -(s.y / u_cssSize.y * 2.0 - 1.0));
 }
+
+// 屏幕 CSS px -> clip（与 gridToClip 的 y 翻转一致）
+vec2 screenToClip(vec2 s) {
+  return vec2(s.x / u_cssSize.x * 2.0 - 1.0, -(s.y / u_cssSize.y * 2.0 - 1.0));
+}
 `;
 
 // 风层共享：坐标变换 + 双线性采样（拼进各 pass）
@@ -129,6 +134,10 @@ vec2 idxToUV(float idx) {
   return (vec2(x, y) + 0.5) / u_particleSize;
 }
 
+// 最低可见拖尾长度（CSS px）：低风速粒子每帧位移不足 1px，直接画只剩一个亮点、
+// 静风区大片空白；沿风方向把段长拉伸到这个下限，让弱风区也有"短短粒子"填充画面（Windy 同款观感）。
+const float MIN_SEG_PX = 3.0;
+
 void main() {
   float pIdx = floor(a_index * 0.5);
   float isHead = mod(a_index, 2.0);
@@ -139,8 +148,16 @@ void main() {
   // 避免从边界到域内随机点的满屏拉丝。正常平流单帧位移远小于 0.25 UV
   // （上限≈0.18 UV @ 速度滑条4×/80m/s 急流/dt 0.05），只有 reset 才跳 ≥0.3。
   float abnorm = step(0.25, length(cur - prev));
-  vec2 pos = isHead > 0.5 ? cur : mix(prev, cur, abnorm);
-  gl_Position = vec4(gridToClip(pos), 0.0, 1.0);
+  vec2 tail = mix(prev, cur, abnorm); // reset 时尾端=头部 → 零长线段
+  // 屏幕空间拉伸：方向 = prev→cur，头部=粒子当前位置，尾端沿反方向延伸到最短段长。
+  // reset 段长 0 → dir=0 → 仍零长（不破坏"重定位不拉丝"的既有约束）。
+  vec2 curS = gridToScreen(cur);
+  vec2 tailS = gridToScreen(tail);
+  vec2 seg = curS - tailS;
+  float segLen = length(seg);
+  vec2 dir = segLen > 1e-5 ? seg / segLen : vec2(0.0, 0.0);
+  vec2 posS = isHead > 0.5 ? curS : curS - dir * max(segLen, MIN_SEG_PX);
+  gl_Position = vec4(screenToClip(posS), 0.0, 1.0);
   vec2 wind = sampleWind(st.xy);
   v_speed01 = clamp(length(wind) / u_maxSpeed, 0.0, 1.0);
 

@@ -23,8 +23,9 @@ interface WindSettings {
 
 export const useWindSettings = create<WindSettings>((set) => ({
   enabled: true,
-  // 简洁明了：60k 默认（Windy 风格可见独立流线），fade 0.96 尾迹适中；弱机由 governor 自动降数
-  particleCount: 60_000,
+  // M7-1 用户定调：15k 默认更精致（可见独立流线，不糊满屏），fade 0.96 尾迹适中；
+  // auto governor 在此基础上小范围调节（见 WindLayer render 的 40k 上限）
+  particleCount: 15_000,
   autoParticles: true,
   palette: 0,
   speed: 1,

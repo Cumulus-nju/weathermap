@@ -96,6 +96,10 @@ body,
   top: 12px;
   right: 12px;
   width: 220px;
+  /* 控件多时允许面板内滚动（max-height 按视口剩余高度，底部留 12px） */
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 14px 16px;
   background: rgba(8, 14, 24, 0.82);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -103,6 +107,16 @@ body,
   backdrop-filter: blur(8px);
   user-select: none;
   z-index: 10;
+}
+.panel::-webkit-scrollbar {
+  width: 6px;
+}
+.panel::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 3px;
+}
+.panel::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.32);
 }
 
 .panel-title {

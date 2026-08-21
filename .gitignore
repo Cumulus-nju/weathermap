@@ -14,3 +14,4 @@ pipeline/*.egg-info/
 # —— 环境 ——
 .env
 .vscode/
+pipeline/ne/

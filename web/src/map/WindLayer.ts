@@ -70,10 +70,18 @@ export class WindLayer implements CustomLayerInterface {
   // M4-2 动态粒子数：EMA 估 FPS，自动模式定期升降粒子数以维持 ~35fps（弱机/软渲染自适应）
   private fpsEma = 0;
   private governTimer = 0;
+  // M7-1 缩放/平移动画中暂停自调节：动画期帧时间被"地图重栅格化+风层"双重负载拖长，
+  // 此刻 fpsEma<28 会误触发降粒子数 + 全量重随机 → 缩放停下后粒子"突然少很多"的观感。
+  // 用 map 事件标移动状态，moveend 后重置计时，重新测稳态 FPS。
+  private moving = false;
+  private lowFpsStreak = 0; // fpsEma<28 连续计数，连续两次慢窗才降（防单帧抖动误降）
 
   // ---- 生命周期 ----
   onAdd(map: MapLibreMap, gl: WebGLRenderingContext) {
     this.map = map;
+    // M7-1 移动状态监听（主题切换会 setStyle→onRemove→onAdd，成对 on/off 防重复注册）
+    map.on('movestart', this.onMoveStart);
+    map.on('moveend', this.onMoveEnd);
     this.gl = gl as WebGL2RenderingContext;
     if (!this.gl.getExtension('EXT_color_buffer_float')) {
       console.warn('WindLayer: EXT_color_buffer_float 不可用，浮点帧缓冲会失败');
@@ -91,6 +99,8 @@ export class WindLayer implements CustomLayerInterface {
   }
 
   onRemove() {
+    this.map.off('movestart', this.onMoveStart);
+    this.map.off('moveend', this.onMoveEnd);
     const gl = this.gl;
     const dels: (WebGLTexture | WebGLFramebuffer | WebGLProgram | WebGLVertexArrayObject | null)[] = [
       this.progUpdate, this.progDraw, this.progFade, this.progComposite,
@@ -109,6 +119,17 @@ export class WindLayer implements CustomLayerInterface {
     this.trailTex = null;
     this.texByKey.clear();
   }
+
+  // ---- M7-1 移动状态（map 事件驱动，箭头函数保持 this 绑定可 off）----
+  private onMoveStart = () => {
+    this.moving = true;
+  };
+  private onMoveEnd = () => {
+    this.moving = false;
+    // 移动期间累计的 fpsEma 被动画帧污染：重新计时，让下一次 governor 基于 3s 稳态 FPS 判断
+    this.governTimer = 0;
+    this.lowFpsStreak = 0;
+  };
 
   // ---- 渲染主循环 ----
   render(_gl: WebGLRenderingContext, _options: CustomRenderMethodInput) {
@@ -135,17 +156,25 @@ export class WindLayer implements CustomLayerInterface {
       return;
     }
 
-    // M4-2 动态粒子数：EMA 估 FPS，自动模式每 ~3s 升降一次（×0.6 / ×1.4）维持 ~35fps
+    // M4-2 动态粒子数：EMA 估 FPS，自动模式每 ~3s 升降一次（×0.6 / ×1.4）维持 ~35fps。
+    // M7-1 移动中跳过：缩放/平移期间的帧率不是稳态表现，降数会造成"缩放后粒子骤减"观感。
     const fpsNow = dt > 0 ? 1 / dt : 60;
     this.fpsEma = this.fpsEma ? this.fpsEma * 0.95 + fpsNow * 0.05 : fpsNow;
     this.governTimer += dt;
-    if (s.autoParticles && this.governTimer > 3) {
+    if (s.autoParticles && !this.moving && this.governTimer > 3) {
       this.governTimer = 0;
       const cur = s.particleCount;
       let next = cur;
-      // 只降不猛升：弱机降数保帧率；强机需明显富余(>60fps)才回升、上限 80k（保持简洁观感，不像原来拉到 200k 糊满屏）
-      if (this.fpsEma < 28) next = Math.max(10_000, Math.round(cur * 0.6));
-      else if (this.fpsEma > 60 && cur < 80_000) next = Math.min(80_000, Math.round(cur * 1.4));
+      // 只降不猛升：弱机降数保帧率；强机需明显富余(>60fps)才回升、上限 40k
+      // （M7-1 收紧上限：默认 20k 走"精致独立流线"观感，auto 只在小范围微调，不再拉回 60-80k 糊满屏）
+      if (this.fpsEma < 28) {
+        // 连续两次慢窗才降：单次慢帧（数据加载/纹理上传/动画尾帧）不足以作为降数依据
+        this.lowFpsStreak++;
+        if (this.lowFpsStreak >= 2) next = Math.max(10_000, Math.round(cur * 0.6));
+      } else {
+        this.lowFpsStreak = 0;
+        if (this.fpsEma > 60 && cur < 40_000) next = Math.min(40_000, Math.round(cur * 1.4));
+      }
       if (next !== cur) s.setParticleCount(next);
     }
 
