@@ -5,11 +5,83 @@
 //   4) 城市搜索：输入北京 → 下拉命中 → 点击后地图中心飞过去 + 读数卡出现
 //   5) 收藏：星标 → localStorage 持久化 → reload 后星仍实心
 //   6) console 无 error/pageerror/reqfail
+//   7) 叠加层像素级断言：阵风色斑(不开等压线)必须真的把大片蓝青色画上地图
+//      （回归防护：M5 曾因 mode===0 被提前 return 导致色斑完全不渲染，图例却正常，纯查图例漏过）
 import { chromium } from 'playwright';
+import zlib from 'node:zlib';
 
 const url = process.argv[2] || 'http://localhost:5174/';
 const shot = process.argv[3] || 'C:/Users/HONOR/weathermap/web/shot-m5.png';
 const FAILS = [];
+
+// 极简 PNG 解码（Playwright 截图 = RGBA8 非隔行）：IHDR + 拼接 IDAT → zlib inflate → 逐行 unfilter
+function decodePng(buf) {
+  let off = 8;
+  let width = 0, height = 0, bitDepth = 0, colorType = 0, interlace = 0;
+  const idat = [];
+  while (off < buf.length) {
+    const len = buf.readUInt32BE(off);
+    const type = buf.toString('ascii', off + 4, off + 8);
+    const data = buf.subarray(off + 8, off + 8 + len);
+    if (type === 'IHDR') {
+      width = data.readUInt32BE(0); height = data.readUInt32BE(4);
+      bitDepth = data[8]; colorType = data[9]; interlace = data[12];
+    } else if (type === 'IDAT') {
+      idat.push(data);
+    } else if (type === 'IEND') break;
+    off += 12 + len;
+  }
+  if ((colorType !== 6 && colorType !== 2) || bitDepth !== 8 || interlace !== 0)
+    throw new Error(`unexpected png format ct=${colorType} bd=${bitDepth} il=${interlace}`);
+  const raw = zlib.inflateSync(Buffer.concat(idat));
+  const bpp = colorType === 6 ? 4 : 3;
+  const stride = width * bpp;
+  const out = Buffer.alloc(stride * height);
+  const prev = Buffer.alloc(stride);
+  for (let y = 0; y < height; y++) {
+    const filter = raw[y * (stride + 1)];
+    const row = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
+    for (let x = 0; x < stride; x++) {
+      const a = x >= bpp ? row[x - bpp] : 0;
+      const b = prev[x];
+      const c = x >= bpp ? prev[x - bpp] : 0;
+      let v;
+      switch (filter) {
+        case 0: v = row[x]; break;
+        case 1: v = (row[x] + a) & 0xff; break;
+        case 2: v = (row[x] + b) & 0xff; break;
+        case 3: v = (row[x] + ((a + b) >> 1)) & 0xff; break;
+        case 4: {
+          const p = a + b - c;
+          const pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+          v = (row[x] + (pa <= pb && pa <= pc ? a : pb <= pc ? b : c)) & 0xff;
+          break;
+        }
+        default: throw new Error(`bad filter ${filter}`);
+      }
+      out[y * stride + x] = v;
+    }
+    prev.set(row);
+  }
+  return { width, height, data: out };
+}
+
+/** 截图缓冲 → 统计 阵风色斑(青蓝/橙) 与 暖色(温度) 像素占比 */
+function countOverlayPixels(pngBuf) {
+  const { width, height, data } = decodePng(pngBuf);
+  let cyan = 0, orange = 0, warm = 0, tot = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    tot++;
+    // 阵风 cmap 中段青蓝 (蓝>绿>红，饱和)；阈值放宽以覆盖 0.65 透明度叠在暗海上的混色
+    if (b > 120 && g > 90 && r < 160 && b > g) cyan++;
+    // 阵风/温度 cmap 橙红
+    if (r > 190 && g > 100 && g < 220 && b < 90) orange++;
+    // 温度 cmap 黄橙红（暖色）
+    if (r > 160 && g > 100 && b < 140) warm++;
+  }
+  return { cyan, orange, warm, tot };
+}
 let pass = 0;
 const check = (name, ok, extra = '') => {
   if (ok) { pass++; console.log(`  ✓ ${name}`); }
@@ -47,7 +119,11 @@ check('surface-only 芯片自动切到地面层', !sfcOnBefore && sfcOnAfter, `b
 const gustLegend = (await page.locator('.legend-title').textContent()) ?? '';
 check('图例标题=阵风', gustLegend.includes('阵风'), gustLegend);
 await page.waitForTimeout(2500);
-await page.screenshot({ path: shot.replace('.png', '-gust.png') });
+const gustShot = await page.screenshot({ path: shot.replace('.png', '-gust.png') });
+// 像素级断言：色斑必须真的渲染（不开等压线，mode=0 仅色斑）——图例出现不代表色斑画上了
+const pix = countOverlayPixels(gustShot);
+const cyanPct = (100 * pix.cyan) / pix.tot;
+check('阵风色斑渲染(青蓝像素)', cyanPct > 2.5, `cyan=${cyanPct.toFixed(1)}%`);
 
 // ---- 2) 等压线 ----
 console.log('-- 2. 等压线 --');

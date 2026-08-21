@@ -81,8 +81,10 @@ export class ColorLayer implements CustomLayerInterface {
   render(_gl: WebGLRenderingContext) {
     const gl = this.gl;
     const o = useOverlay.getState();
+    // mode：0=仅色斑 1=仅等压线 2=色斑+等压线（isoOn 决定）
+    // ⚠️ 勿在 mode===0 时 return——那正是「只开色斑不开等压线」的常态！
     const mode: number = o.isoOn ? (o.field !== 'off' ? 2 : 1) : 0;
-    if (mode === 0) return;
+    if (o.field === 'off' && !o.isoOn) return; // 两者全关才跳过
     // 收窄：mode!==1 时必有色斑字段（TS 无法从 mode 推断，这里显式 null 化）
     const colorField: Exclude<OverlayField, 'off'> | null = o.field === 'off' ? null : o.field;
     const t = useTime.getState();
