@@ -99,6 +99,8 @@ out vec4 fragColor;
 uniform sampler2D u_state;  // 上一步粒子状态 (x,y,prevX,prevY)
 uniform float u_dt;         // 秒
 uniform float u_speed;      // 视觉速度倍率（物理 UV/s × 倍率）
+uniform float u_elapsed;    // 层累计运行秒数（重生相位基准，只增不减）
+uniform float u_reseedPeriod; // 粒子平均寿命（秒）：到期随机重生
 ${COMMON}
 void main() {
   vec4 st = texture(u_state, v_uv);
@@ -110,7 +112,12 @@ void main() {
   vec2 degPerSec = wind / (111320.0 * vec2(cosLat, 1.0));
   vec2 uvPerSec = degPerSec / u_domainSpan;
   vec2 newPos = pos + uvPerSec * u_speed * u_dt;
-  if (newPos.x < 0.0 || newPos.x > 1.0 || newPos.y < 0.0 || newPos.y > 1.0) {
+  // M7-1 粒子寿命重生：平流会把粒子卷进气旋/急流等吸引子、别处越卷越空（气旋中心出现空洞）；
+  // 每个粒子按"时间相位+位置哈希"平均每 u_reseedPeriod 秒随机重生一次，全局覆盖一直均匀（Windy 同款）。
+  // 相位跨整周期即触发：phase 随 u_elapsed 每周期 0→1 走一次，落在 [0, dt/L] 窗口就重生。
+  float agePhase = fract(u_elapsed / u_reseedPeriod + hash1(pos.x * 3.1 + pos.y * 7.7 + 0.13));
+  if (newPos.x < 0.0 || newPos.x > 1.0 || newPos.y < 0.0 || newPos.y > 1.0
+      || agePhase < u_dt / u_reseedPeriod) {
     newPos = vec2(hash1(pos.x * 3.1 + 0.13), hash1(pos.y * 7.7 + 0.57));
   }
   fragColor = vec4(newPos, pos);

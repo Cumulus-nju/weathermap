@@ -283,6 +283,9 @@ export class WindLayer implements CustomLayerInterface {
     gl.uniform1f(this.u(this.progUpdate, 'u_mix'), mix);
     gl.uniform1f(this.u(this.progUpdate, 'u_dt'), dt);
     gl.uniform1f(this.u(this.progUpdate, 'u_speed'), s.speed * VISUAL_SPEED);
+    // M7-1 粒子寿命重生：每粒子平均 5s 随机重生一次，防气旋/急流把粒子卷走留下空洞
+    gl.uniform1f(this.u(this.progUpdate, 'u_elapsed'), performance.now() / 1000);
+    gl.uniform1f(this.u(this.progUpdate, 'u_reseedPeriod'), 5);
     gl.disable(gl.BLEND);
     gl.bindVertexArray(this.vaoQuad);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
